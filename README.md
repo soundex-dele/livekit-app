@@ -2,7 +2,12 @@
 
 AV Platform 的客户端应用仓库。
 
-当前仅初始化仓库，尚未实现应用功能；技术栈、构建方式和运行入口待确定。
+已实现首版远程协助：`native/` 为 C++20 + ImGui + SDL2 被控端，`web/` 为 TypeScript + Vite 浏览器控制端。构建、启动及验收边界见 [远控运行文档](../docs/remote-control/README.md)。原设计中的账号、会议等完整客户端能力尚未实现。
+
+## 设计文档
+
+- [客户端设计](docs/design.md)：模块、会话状态、线程与渲染、业务接入、远控和验收计划。
+- [平台总体设计](../docs/platform-design.md)：在 AV Platform 同级仓库布局下阅读。
 
 ## 规划职责
 
@@ -16,5 +21,5 @@ AV Platform 的客户端应用仓库。
 
 - [av-platform](https://github.com/soundex-dele/av-platform)：聚合仓库与平台架构文档。
 - [livekit-sdk-cpp](https://github.com/soundex-dele/livekit-sdk-cpp)：原生 C++ RTC SDK。
-- [livekit-server](https://github.com/soundex-dele/livekit-server)：业务服务。
+- [livekit-server](../livekit-server/README.md)：本地业务服务仓库，尚未创建远程。
 - [livekit-cpp](https://github.com/soundex-dele/livekit-cpp)：媒体服务。
