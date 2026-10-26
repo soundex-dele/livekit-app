@@ -1,8 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {point,ControlQueue,type Grant} from '../src/protocol.ts';
+import {point,ControlQueue,type Grant} from '../src/features/remote_control/protocol.ts';
 import {readFileSync} from 'node:fs';
 test('shared C++ / browser contract messages use the same envelope',async()=>{
- const fixture=JSON.parse(readFileSync(new URL('../../../docs/remote-control/messages.json',import.meta.url),'utf8'));
+ const fixture=JSON.parse(readFileSync(new URL('../../../../../docs/integration/remote-control/messages.json',import.meta.url),'utf8'));
  const sent:any[]=[];const q=new ControlQueue({grant_id:'example',epoch:1} as Grant,async b=>{sent.push(JSON.parse(new TextDecoder().decode(b)));},e=>{throw e});
  for(const message of fixture.controller_messages){const {v,grant_id,epoch,seq,...event}=message;q.push(event);}
  await new Promise(r=>setTimeout(r,20));assert.deepEqual(sent,fixture.controller_messages);q.close();

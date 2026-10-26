@@ -1,6 +1,6 @@
 #pragma once
-#include "session.hpp"
-#include "emergency_hotkey.hpp"
+#include "services/session.hpp"
+#include "infrastructure/emergency_hotkey.hpp"
 namespace remote_app {
 enum class Action {None,Start,Approve,Reject,Stop};
 struct View {

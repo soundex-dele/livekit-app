@@ -1,16 +1,14 @@
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { ControlQueue, point, topic, type Grant, type Layout } from './protocol';
-import './style.css';
+import { request } from '../../services/api';
 const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
 const form=el<HTMLFormElement>('connect-form'),video=el<HTMLVideoElement>('screen'),viewport=el('viewport');
 const button=el<HTMLButtonElement>('connect'),stop=el<HTMLButtonElement>('stop');
 let generation=0,credential='',grant:Grant|undefined,room:Room|undefined,queue:ControlQueue|undefined,layout:Layout|undefined;
 let connecting=false,enabled=false,stopping=false,heartbeat:ReturnType<typeof setInterval>|undefined,poll:ReturnType<typeof setTimeout>|undefined;
 const status=(text:string)=>{el('status').textContent=text;};
-async function api(path:string,body?:unknown,token=credential){
-  const response=await fetch('/api/v1/'+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(5000)});
-  const value=await response.json();if(!response.ok)throw new Error(value.error?.code||`HTTP ${response.status}`);return value;
-}
+const api=(path:string,body?:unknown,token=credential)=>request(path,body,token);
+
 function release(){enabled=false;if(layout)queue?.push({type:'release'});el('input-status').textContent='键鼠已暂停，点击远程画面重新启用。';}
 async function end(message:string){
   if(stopping)return;stopping=true;generation++;clearInterval(heartbeat);clearTimeout(poll);release();

@@ -1,5 +1,6 @@
 #pragma once
-#include "http.hpp"
+#include "domain/snapshot.hpp"
+#include "infrastructure/http.hpp"
 #include <livekit/room.hpp>
 #include <atomic>
 #include <deque>
@@ -8,10 +9,6 @@
 
 namespace remote_app {
 namespace sdk=livekit::sdk;
-struct Snapshot {
-  std::string state="idle",code,name,error,id;
-  bool finished=true;
-};
 class Session {
  public:
   Session(bool fixture=false,std::shared_ptr<sdk::ControlInputSink> sink={});

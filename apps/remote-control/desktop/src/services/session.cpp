@@ -1,4 +1,4 @@
-#include "session.hpp"
+#include "services/session.hpp"
 #include <algorithm>
 #include <future>
 #include <stdexcept>
@@ -26,13 +26,13 @@ void Session::update(const sdk::Json& v,sdk::ControlClock::time_point started){
 void Session::run(std::string url){
   std::string id,credential;bool started_media=false;
   try {
-    sdk::Json empty=sdk::Json::object();auto began=sdk::ControlClock::now();auto v=request(url,"/api/v1/pairings","",&empty);id=v.at("id");credential=v.at("credential");update(v,began);
+    sdk::Json empty=sdk::Json::object();auto began=sdk::ControlClock::now();auto v=request(url,"/api/v1/remote-control/pairings","",&empty);id=v.at("id");credential=v.at("credential");update(v,began);
     {std::lock_guard lock(mutex_);snapshot_.code=v.at("pairing_code");}
     auto next=sdk::ControlClock::now();
     while(!stop_){
       auto now=sdk::ControlClock::now();int action=action_.exchange(0);
       if(action||now>=next){
-        std::string route="/api/v1/control-grants/"+id;
+        std::string route="/api/v1/remote-control/control-grants/"+id;
         const auto state=snapshot().state;
         if(action)route+=action==1?"/approve":"/reject";else if(state=="approved")route+="/renew";
         auto request_started=sdk::ControlClock::now();v=request(url,route,credential,(action||state=="approved")?&empty:nullptr);update(v,request_started);
@@ -46,7 +46,7 @@ void Session::run(std::string url){
     }
   }catch(const std::exception&e){std::lock_guard lock(mutex_);snapshot_.error=e.what();}
   stop();if(rtc_.joinable())rtc_.join();
-  if(!id.empty())try{sdk::Json empty=sdk::Json::object();request(url,"/api/v1/control-grants/"+id+"/revoke",credential,&empty);}catch(const std::exception&e){std::lock_guard lock(mutex_);if(snapshot_.error.empty())snapshot_.error=e.what();}
+  if(!id.empty())try{sdk::Json empty=sdk::Json::object();request(url,"/api/v1/remote-control/control-grants/"+id+"/revoke",credential,&empty);}catch(const std::exception&e){std::lock_guard lock(mutex_);if(snapshot_.error.empty())snapshot_.error=e.what();}
   // Room destruction joins its callback thread. Never hold the snapshot mutex
   // across that join: participant callbacks also acquire this mutex.
   std::shared_ptr<sdk::Room> finished_room;{std::lock_guard lock(mutex_);finished_room=std::move(room_);}
@@ -55,7 +55,7 @@ void Session::run(std::string url){
 }
 void Session::media(std::string url,std::string id,std::string credential){
   try{
-    sdk::Json empty=sdk::Json::object();auto connection=request(url,"/api/v1/control-grants/"+id+"/connect",credential,&empty);if(stop_)return;
+    sdk::Json empty=sdk::Json::object();auto connection=request(url,"/api/v1/remote-control/control-grants/"+id+"/connect",credential,&empty);if(stop_)return;
     sdk::RoomCallback cb;
     cb.on_disconnected=[this](int){control_->stop("media_disconnected");stop_=true;};
     cb.on_participant_disconnected=[this](const sdk::RemoteParticipant& p){std::string identity;{std::lock_guard lock(mutex_);identity=grant_.controller_identity;}if(p.identity()==identity){control_->stop("controller_disconnected");stop_=true;}};
