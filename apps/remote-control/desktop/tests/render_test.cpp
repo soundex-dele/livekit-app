@@ -1,34 +1,111 @@
-#define SDL_MAIN_HANDLED
-#include <SDL.h>
-#include <imgui.h>
-#include <av/locale.hpp>
-#include <imgui_impl_sdl2.h>
-#include <imgui_impl_sdlrenderer2.h>
 #include "features/remote_control/ui.hpp"
-#include <stdexcept>
+#include <QApplication>
+#include <QDir>
+#include <QTest>
+#include <algorithm>
 #include <iostream>
-int main(){try{
-  auto check=[](bool ok,const char* message){if(!ok)throw std::runtime_error(message);};
-  unsigned calls=0;
-  auto primary=remote_app::register_emergency_hotkey([&](unsigned key,unsigned long&){++calls;check(key==0x79,"Primary hotkey must be F10");return true;});
-  check(primary.available()&&calls==1,"Primary registration");
-  calls=0;
-  auto fallback=remote_app::register_emergency_hotkey([&](unsigned key,unsigned long& error){++calls;error=1409;check(key!=0x7b,"Reserved F12 must never be registered");return key==0x78;});
-  check(fallback.available()&&calls==2&&fallback.error==0&&std::string(fallback.label)=="Ctrl + Alt + F9","Conflict fallback");
-  calls=0;
-  auto unavailable=remote_app::register_emergency_hotkey([&](unsigned,unsigned long& error){++calls;error=1409;return false;});
-  check(!unavailable.available()&&calls==2&&unavailable.error==1409,"All shortcuts unavailable must be nonfatal");
-  SDL_SetMainReady();if(SDL_Init(SDL_INIT_VIDEO))throw std::runtime_error(SDL_GetError());
-  auto*w=SDL_CreateWindow("test",0,0,760,560,SDL_WINDOW_HIDDEN);auto*r=SDL_CreateRenderer(w,-1,SDL_RENDERER_SOFTWARE);if(!r)throw std::runtime_error(SDL_GetError());
-  ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;av::ui::load_chinese_font();ImGui_ImplSDL2_InitForSDLRenderer(w,r);ImGui_ImplSDLRenderer2_Init(r);
-  remote_app::View view;
-  for(const auto*state:{"idle","waiting","pending","approved","ended"}){
-    view.hotkey=std::string(state)=="approved"?unavailable:std::string(state)=="pending"?fallback:primary;
-    remote_app::Snapshot s;s.state=state;s.code="0123456789";s.name="协助者小明";s.finished=s.state=="idle"||s.state=="ended";
-    ImGui_ImplSDLRenderer2_NewFrame();ImGui_ImplSDL2_NewFrame();ImGui::NewFrame();view.draw(s);ImGui::Render();SDL_SetRenderDrawColor(r,18,22,29,255);SDL_RenderClear(r);ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(),r);
-    auto*surface=SDL_CreateRGBSurfaceWithFormat(0,760,560,32,SDL_PIXELFORMAT_ARGB8888);if(SDL_RenderReadPixels(r,nullptr,surface->format->format,surface->pixels,surface->pitch))throw std::runtime_error(SDL_GetError());
-    if(SDL_SaveBMP(surface,(std::string("remote-host-")+state+".bmp").c_str()))throw std::runtime_error(SDL_GetError());SDL_FreeSurface(surface);
-    if(ImGui::GetDrawData()->TotalVtxCount<100)throw std::runtime_error("Empty UI");
+int main(int argc, char **argv) {
+  QApplication app(argc, argv);
+  remote_app::apply_theme();
+  try {
+    auto check = [](bool x, const char *m) {
+      if (!x)
+        throw std::runtime_error(m);
+    };
+    remote_app::MainWindow window(true);
+    window.show();
+    for (const auto *state :
+         {"idle", "waiting", "pending", "approved", "ended"}) {
+      remote_app::Snapshot s;
+      s.state = state;
+      s.code = "0123456789";
+      s.name = "协助者小明";
+      s.finished = s.state == "idle" || s.state == "ended";
+      window.display(s, {}, {true, true, true});
+      app.processEvents();
+      check(window.grab().save(QString("remote-host-%1.png").arg(state)),
+            "save screenshot");
+      check(window.findChild<QPushButton *>("approve")->isVisible() ==
+                (s.state == "pending"),
+            "approval visibility");
+      check(window.findChild<QPushButton *>("createCode")->isEnabled() ==
+                (s.finished || s.state == "waiting"),
+            "regenerate only before a request or after cleanup");
+    }
+    window.display({}, {}, {false, false, true});
+    app.processEvents();
+    check(window.grab().save("remote-host-permissions.png"),
+          "permission screenshot");
+    check(remote_app::video_point({0, 0, 800, 600}, {1600, 900}, {400, 300})
+              .has_value(),
+          "center");
+    check(!remote_app::video_point({0, 0, 800, 600}, {1600, 900}, {400, 10}),
+          "letterbox excluded");
+    remote_app::Snapshot pending;
+    pending.state = "pending";
+    pending.finished = false;
+    pending.name = "权限测试";
+    window.display(pending, {}, {false, false, true});
+    app.processEvents();
+    check(!window.findChild<QPushButton *>("approve")->isEnabled(),
+          "permission blocks approval");
+    remote_app::Snapshot failure;
+    failure.state = "ended";
+    failure.error = "业务服务不可达，请检查服务地址后重试";
+    window.display(failure, {}, {true, true, true});
+    app.processEvents();
+    check(window.grab().save("remote-host-error.png"), "error screenshot");
+    remote_app::VideoWidget surface;
+    surface.resize(800, 600);
+    QImage pixels(1600, 900, QImage::Format_RGB32);
+    pixels.fill(Qt::black);
+    std::vector<livekit::sdk::Json> recorded;
+    int releases = 0;
+    surface.send = [&](auto event) { recorded.push_back(event); };
+    surface.released = [&] { ++releases; };
+    surface.present(pixels, true, false, 1);
+    surface.show();
+    app.processEvents();
+    QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+                      QPoint(400, 20));
+    check(recorded.empty(), "letterbox does not inject");
+    QTest::mouseClick(&surface, Qt::LeftButton, Qt::NoModifier,
+                      QPoint(400, 300));
+    check(recorded.size() == 2, "content click forwarded");
+    // QTest's synthesized spontaneous Cocoa event carries nativeVirtualKey=0
+    // (a real physical A). Send a non-native event to test focus traversal.
+    QKeyEvent backtabDown(QEvent::KeyPress, Qt::Key_Backtab, Qt::ShiftModifier);
+    QKeyEvent backtabUp(QEvent::KeyRelease, Qt::Key_Backtab, Qt::ShiftModifier);
+    QApplication::sendEvent(&surface, &backtabDown);
+    QApplication::sendEvent(&surface, &backtabUp);
+    check(std::any_of(recorded.begin(), recorded.end(), [](const auto &e) {
+            return e.value("code", "") == "Tab" && e.value("down", false);
+          }), "shift-tab reaches remote instead of traversing local focus");
+    QTest::keyPress(&surface, Qt::Key_Shift);
+    auto count = recorded.size();
+    surface.pause();
+    check(releases > 0 && !surface.target(),
+          "pause releases and clears target");
+    QTest::keyPress(&surface, Qt::Key_A);
+    check(recorded.size() == count, "paused input ignored");
+    remote_app::Controller controller;
+    remote_app::ControlWindow view(controller);
+    remote_app::ControllerSnapshot c;
+    c.finished = false;
+    c.layout = 1;
+    c.width = 1280;
+    c.height = 720;
+    c.text_supported = true;
+    c.image = QImage(640, 360, QImage::Format_RGB32);
+    c.image.fill(QColor("#3b638c"));
+    view.present(c);
+    view.show();
+    app.processEvents();
+    check(view.grab().save("remote-controller.png"), "controller screenshot");
+    std::cout << "Qt offscreen render and geometry checks passed\n";
+    return 0;
+  } catch (const std::exception &e) {
+    std::cerr << e.what() << '\n';
+    return 1;
   }
-  ImGui_ImplSDLRenderer2_Shutdown();ImGui_ImplSDL2_Shutdown();ImGui::DestroyContext();SDL_DestroyRenderer(r);SDL_DestroyWindow(w);SDL_Quit();std::cout<<"ImGui states rendered\n";return 0;
-}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+}
