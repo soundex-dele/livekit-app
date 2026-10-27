@@ -2,6 +2,7 @@
 #include "domain/snapshot.hpp"
 #include "infrastructure/http.hpp"
 #include <livekit/room.hpp>
+#include <livekit/remote_control.hpp>
 #include <atomic>
 #include <deque>
 #include <mutex>

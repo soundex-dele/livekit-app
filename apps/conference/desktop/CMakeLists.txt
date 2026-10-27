@@ -1,0 +1,39 @@
+cmake_minimum_required(VERSION 3.24)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  project(av_conference_desktop VERSION 0.3.0 LANGUAGES C CXX)
+  include(CTest)
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/NativeSDK.cmake")
+if(NOT TARGET LiveKit::SDK)
+  av_add_native_sdk(ON OFF)
+endif()
+if(NOT TARGET av_imgui)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../packages/native/imgui" "${CMAKE_BINARY_DIR}/av_imgui")
+endif()
+add_library(livekit_demo_session STATIC session.cpp)
+target_include_directories(livekit_demo_session PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(livekit_demo_session PUBLIC LiveKit::SDK)
+add_executable(livekit_conference_demo main.cpp ui.cpp video_texture.cpp)
+target_link_libraries(livekit_conference_demo PRIVATE livekit_demo_session av_imgui)
+if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set_target_properties(livekit_conference_demo PROPERTIES
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "org.livekit.conference-demo"
+    MACOSX_BUNDLE_BUNDLE_NAME "LiveKit Conference"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+  install(TARGETS livekit_conference_demo BUNDLE DESTINATION . COMPONENT Conference)
+  # Copy non-system dylibs (OpenSSL, libvpx, dav1d) and rewrite their install
+  # names so the installed app does not depend on the developer's Homebrew.
+  configure_file(macos/InstallBundle.cmake.in InstallBundle.cmake @ONLY)
+  install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/InstallBundle.cmake" COMPONENT Conference)
+endif()
+if(BUILD_TESTING)
+  add_executable(livekit_demo_integration tests/demo_integration.cpp)
+  target_link_libraries(livekit_demo_integration PRIVATE livekit_demo_session)
+  add_executable(livekit_demo_tests tests/demo_tests.cpp ui.cpp video_texture.cpp)
+  target_link_libraries(livekit_demo_tests PRIVATE livekit_demo_session av_imgui)
+  add_test(NAME demo_render COMMAND livekit_demo_tests)
+  set_tests_properties(demo_render PROPERTIES TIMEOUT 30 ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_RENDER_DRIVER=software")
+endif()
