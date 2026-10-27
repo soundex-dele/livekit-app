@@ -6,7 +6,7 @@ option(AV_BUILD_REMOTE_CONTROL_DESKTOP "Build the remote-control desktop product
 option(AV_BUILD_SCREEN_CAST_DESKTOP "Build the screen-cast desktop product" ON)
 option(AV_BUILD_CONFERENCE_DESKTOP "Build the conference desktop product" ON)
 option(AV_BUILD_PLAYER_DESKTOP "Build the local-file player (requires FFmpeg and SDL development packages)" OFF)
-option(AV_BUILD_LIVE_STUDIO_DESKTOP "Build Windows live studio" OFF)
+option(AV_BUILD_LIVE_STUDIO_DESKTOP "Build desktop live studio" OFF)
 include(CTest)
 include(cmake/NativeSDK.cmake)
 set(_av_rtc OFF)

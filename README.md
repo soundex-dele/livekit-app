@@ -30,8 +30,9 @@ AV Platform 的客户端应用仓库。
 
 客户端根 CMake 可编排产品；桌面端也可用 `cmake -S apps/remote-control/desktop -B out/remote-control-desktop` 独立配置（需 Windows、VS2022 和 vcpkg 静态工具链）。Web 命令在对应 APP 的 web 目录运行。完整构建使用聚合仓库的 `scripts/build/remote-control.ps1`。
 
-## 视频会议与播放器
+## 视频会议、播放器与直播助手
 
+- [直播助手](apps/live-studio/desktop/README.md)：`av_live_studio`，Windows / macOS 平台实现、Metal 合成、原生采集和独立 `.app` 打包。
 - [视频会议](apps/conference/desktop/README.md)：`livekit_conference_demo`，保留 Windows/macOS、Retina 适配和 macOS `.app` 打包。
 - [本地播放器](apps/player/desktop/README.md)：`livekit_local_player`，独立依赖 SDK 播放引擎，无需 WebRTC；Windows 构建脚本为 `scripts/build-player-windows.ps1`。
 
