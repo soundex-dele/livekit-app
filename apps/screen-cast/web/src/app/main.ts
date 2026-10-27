@@ -17,6 +17,7 @@ async function finish(run: Run, message = '', state = '已结束') {
  // Disconnect media immediately, before the business notification.
  const disconnected = room?.disconnect();
  video.pause(); video.srcObject = null;
+ if (current === run) document.body.dataset.playing = 'false';
  if (current === run) { badge.textContent = state; error.textContent = message; code.textContent = '—'; expiry.textContent = ''; hint.textContent = '再次传屏需要生成新投屏码。'; stop.disabled = true; fullscreen.disabled = true; placeholder.hidden = false; }
  await disconnected;
  if (run.session) await api(`sessions/${run.session.id}/stop`, run.session.credential, {}, true).catch(() => {});
@@ -37,7 +38,7 @@ async function connect(run: Run) {
    track.attach(video); video.muted = true;
    run.frameCallback = video.requestVideoFrameCallback(() => {
     if (!active(run)) return;
-    run.frames = true; badge.textContent = '正在播放'; placeholder.hidden = true; fullscreen.disabled = false; hint.textContent = '正在接收 Windows 共享画面。';
+    run.frames = true; document.body.dataset.playing = 'true'; badge.textContent = '正在播放'; placeholder.hidden = true; fullscreen.disabled = false; hint.textContent = '正在接收 电脑共享画面。';
    });
    void video.play().catch(e => finish(run,errorText(e)));
   });
@@ -53,7 +54,7 @@ receive.addEventListener('click',async()=>{
  try {
   const session = await api<SessionInfo>('sessions','',{});run.session=session;
   if(!active(run)){await api(`sessions/${session.id}/stop`,session.credential,{},true).catch(()=>{});return;}
-  code.textContent=session.code!;badge.textContent='等待配对';hint.textContent='在 Windows 发送端输入上方投屏码。';
+  code.textContent=session.code!;badge.textContent='等待配对';hint.textContent='在 电脑发送端输入上方投屏码。';
   while(active(run)){
    const s=await api<SessionInfo>(`sessions/${session.id}`,session.credential);
    if(!active(run))break;
