@@ -8,4 +8,8 @@ Thumbs.db
 /dist/
 /node_modules/
 /.venv/
+**/node_modules/
+**/dist/
+__pycache__/
+*.pyc
 *.log

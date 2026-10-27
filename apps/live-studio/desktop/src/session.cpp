@@ -1,0 +1,74 @@
+#include "session.hpp"
+#include <av/http.hpp>
+#include <windows.h>
+#include <wincrypt.h>
+#include <fstream>
+#include <algorithm>
+namespace studio_app {
+namespace {const std::string prefix="/api/v1/live-studio/";}
+Session::Session(std::filesystem::path settings,sdk::StudioOptions options):settings_(std::move(settings)),engine_(std::make_shared<sdk::Studio>(options)){
+ try{if(std::filesystem::exists(settings_)){std::ifstream f(settings_,std::ios::binary);std::vector<char>bytes((std::istreambuf_iterator<char>(f)),{});if(bytes.size()>16384)throw std::runtime_error("账号配置过大");DATA_BLOB in{DWORD(bytes.size()),reinterpret_cast<BYTE*>(bytes.data())},out{};if(CryptUnprotectData(&in,nullptr,nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out)){try{auto j=Json::parse(out.pbData,out.pbData+out.cbData);url_=j.at("url");token_=j.at("token");}catch(...){LocalFree(out.pbData);throw;}LocalFree(out.pbData);}}}catch(const std::exception&e){state_.error=e.what();}
+ state_.server_url=url_;
+ worker_=std::jthread([this]{run();});
+ media_worker_=std::jthread([this]{while(!closing_){
+  std::shared_ptr<sdk::VideoFrameStream>video;std::shared_ptr<sdk::AudioFrameStream>audio;
+  {std::lock_guard lock(mutex_);video=stage_video_;audio=stage_audio_;}
+  try{
+   if(video)for(int i=0;i<6;++i){auto result=video->read(std::chrono::milliseconds(0));if(result.status!=sdk::VideoReadStatus::frame)break;std::lock_guard lock(mutex_);if(video==stage_video_)engine_->submit_remote_video(result.frame->track_id,*result.frame);}
+   if(audio)for(int i=0;i<20;++i){auto result=audio->read(std::chrono::milliseconds(0));if(result.status!=sdk::AudioReadStatus::frame)break;std::lock_guard lock(mutex_);if(audio==stage_audio_)engine_->submit_remote_audio(result.frame->track_id,*result.frame);}
+  }catch(const std::exception&e){std::lock_guard lock(mutex_);state_.error=e.what();}
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+ }});
+
+}
+Session::~Session(){closing_=true;{std::lock_guard lock(mutex_);if(program_)program_->request_stop();if(stage_)stage_->request_stop();}if(media_worker_.joinable())media_worker_.join();if(worker_.joinable())worker_.join();}
+std::shared_ptr<sdk::Studio>Session::engine()const{std::lock_guard lock(mutex_);return engine_;}
+Snapshot Session::snapshot()const{std::lock_guard lock(mutex_);return state_;}
+void Session::enqueue(std::function<void()>f){std::lock_guard lock(mutex_);if(commands_.size()<32)commands_.push_back(std::move(f));else state_.error="操作队列已满，请稍后重试";}
+Json Session::request(const std::string&path,const Json*body){return av::request(url_,path,token_,body);}
+void Session::store_token(){std::filesystem::create_directories(settings_.parent_path());auto text=Json{{"url",url_},{"token",token_}}.dump();DATA_BLOB in{DWORD(text.size()),reinterpret_cast<BYTE*>(text.data())},out{};if(!CryptProtectData(&in,L"AV Live Studio",nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out))throw std::runtime_error("无法加密账号凭证");std::ofstream f(settings_,std::ios::binary|std::ios::trunc);f.write(reinterpret_cast<char*>(out.pbData),out.cbData);LocalFree(out.pbData);if(!f)throw std::runtime_error("无法保存账号凭证");}
+void Session::login(std::string url,std::string name,std::string password,bool registration){enqueue([this,url=std::move(url),name=std::move(name),password=std::move(password),registration]()mutable{if(!broadcast_.empty())throw std::runtime_error("请先结束直播");if(!url.starts_with("https://")&&!url.starts_with("http://127.0.0.1:")&&!url.starts_with("http://localhost:"))throw std::runtime_error("公网服务请使用 HTTPS");while(url.ends_with('/'))url.pop_back();url_=url;token_.clear();Json body{{"name",name},{"password",password}};auto result=request(std::string("/api/v1/auth/")+(registration?"register":"login"),&body);std::fill(password.begin(),password.end(),'\0');token_=result.at("session_token");store_token();{std::lock_guard lock(mutex_);state_.server_url=url_;state_.user=result.at("user");state_.error.clear();}refresh_rooms();});}
+void Session::logout(){enqueue([this]{disconnect();Json empty=Json::object();request("/api/v1/auth/logout",&empty);token_.clear();store_token();std::lock_guard lock(mutex_);state_.user=nullptr;});}
+void Session::change_password(std::string old,std::string password){enqueue([this,old=std::move(old),password=std::move(password)]{Json body{{"old_password",old},{"password",password}};request("/api/v1/auth/password",&body);disconnect();token_.clear();store_token();std::lock_guard lock(mutex_);state_.user=nullptr;state_.state="密码已更新，请重新登录";});}
+void Session::start(std::string title){enqueue([this,title=std::move(title)]{if(!broadcast_.empty())return;if(token_.empty())throw std::runtime_error("请先登录");Json c{{"title",title}};auto result=request(prefix+"start",&c);broadcast_=result.at("id");sequence_=0;{std::lock_guard lock(mutex_);state_.broadcast=broadcast_;state_.state="连接直播服务…";state_.events=Json::array();}try{connect(false);events_start();}catch(...){try{Json empty=Json::object();request(prefix+"broadcasts/"+broadcast_+"/stop",&empty);}catch(...){}disconnect();throw;}});}
+void Session::stop(){enqueue([this]{if(broadcast_.empty())return;Json empty=Json::object();request(prefix+"broadcasts/"+broadcast_+"/stop",&empty);disconnect();});}
+void Session::command(std::string action,Json payload){enqueue([this,action=std::move(action),payload=std::move(payload)]{if(broadcast_.empty())throw std::runtime_error("当前没有直播");request(prefix+"broadcasts/"+broadcast_+"/"+action,&payload);});}
+void Session::refresh_rooms(){enqueue([this]{auto rooms=request(prefix+"rooms");std::lock_guard lock(mutex_);state_.rooms=std::move(rooms);});}
+void Session::reconfigure(sdk::StudioOptions o){enqueue([this,o]{if(!broadcast_.empty()||engine()->snapshot().recording)throw std::runtime_error("开播或录制时不能改变画布尺寸");auto next=std::make_shared<sdk::Studio>(o);std::shared_ptr<sdk::Studio>old;{std::lock_guard lock(mutex_);next->set_scene(scene_);next->set_audio(audio_);old=std::move(engine_);engine_=std::move(next);}});}
+void Session::set_scene(sdk::StudioScene s){std::lock_guard lock(mutex_);engine_->set_scene(s);scene_=std::move(s);}
+void Session::set_audio(sdk::StudioAudioSettings a){std::lock_guard lock(mutex_);engine_->set_audio(a);audio_=a;}
+void Session::connect(bool interaction){
+ Json args{{"stage",interaction}};auto credentials=request(prefix+"broadcasts/"+broadcast_+"/connect",&args);sdk::RoomOptions o;o.url=credentials.at("media_url");o.token=credentials.at("media_token");o.subscribe=interaction;o.stats_interval_ms=1000;o.connect_timeout=10;o.audio_playout=false;
+ auto producer=engine();sdk::MediaSpec video;auto opts=producer->options();video.width=opts.width;video.height=opts.height;video.fps=opts.fps;video.video_source=interaction?producer->local_video_output():producer->video_output();sdk::MediaSpec audio;audio.video=false;audio.audio_source=interaction?producer->local_audio_output():producer->audio_output();o.media={video,audio};
+ if(interaction){std::lock_guard lock(mutex_);stage_video_=std::make_shared<sdk::VideoFrameStream>();stage_audio_=std::make_shared<sdk::AudioFrameStream>();o.video_frame_stream=stage_video_;o.audio_frame_stream=stage_audio_;}
+ sdk::RoomCallback callbacks;
+ if(!interaction)callbacks.on_stats=[this,previous=std::make_shared<std::array<uint64_t,3>>()](const Json&e){auto&lastBytes=(*previous)[0];auto&lastFrames=(*previous)[1];auto&lastTime=(*previous)[2];
+  if(e.value("target",-1)!=0)return;{std::lock_guard lock(mutex_);state_.media_stats=Json::array();for(auto&row:e.value("stats",Json::array()))if(row.value("type","")=="outbound-rtp"||row.value("type","")=="media-source")state_.media_stats.push_back(row);}uint64_t bytes=0,frames=0;for(auto&row:e.value("stats",Json::array()))if(row.value("type","")=="outbound-rtp"){bytes+=row.value("bytesSent",uint64_t(0));frames+=row.value("framesEncoded",uint64_t(0));}
+  auto time=e.value("timestampUs",uint64_t(0));if(lastTime&&time>lastTime&&bytes>=lastBytes&&frames>=lastFrames){double seconds=double(time-lastTime)/1e6;std::lock_guard lock(mutex_);state_.bitrate_kbps=double(bytes-lastBytes)*8/seconds/1000;state_.publish_fps=double(frames-lastFrames)/seconds;}lastBytes=bytes;lastFrames=frames;lastTime=time;
+ };
+ if(interaction)callbacks.on_track_unsubscribed=[producer](const sdk::TrackPublication&track,const sdk::RemoteParticipant&){producer->remove_remote(track.sid());};auto room=std::make_shared<sdk::Room>(std::move(callbacks));{std::lock_guard lock(mutex_);if(interaction)stage_=room;else program_=room;}room->join_with_token(o.url,o.token,o);
+ if(!interaction){std::lock_guard lock(mutex_);state_.connected=true;state_.state="等待服务端确认发布";}
+}
+void Session::close_stage(){std::shared_ptr<sdk::Room>old;{std::lock_guard lock(mutex_);old=std::move(stage_);stage_video_.reset();stage_audio_.reset();}if(old)old->disconnect();stage_key_.clear();engine()->clear_remote();}
+void Session::disconnect(){if(events_){events_->stop();events_.reset();}close_stage();std::shared_ptr<sdk::Room>old;{std::lock_guard lock(mutex_);old=std::move(program_);}if(old)old->disconnect();broadcast_.clear();sequence_=0;std::lock_guard lock(mutex_);state_.connected=false;state_.broadcast.clear();state_.state="未开播";state_.live=nullptr;}
+void Session::events_start(){if(events_){events_->stop();events_.reset();}auto ws=std::make_unique<ix::WebSocket>();auto address=url_;if(address.starts_with("https:"))address.replace(0,5,"wss");else address.replace(0,4,"ws");ws->setUrl(address+prefix+"broadcasts/"+broadcast_+"/events?after="+std::to_string(sequence_));ws->setExtraHeaders({{"Authorization","Bearer "+token_}});ws->setOnMessageCallback([this](const ix::WebSocketMessagePtr&m){if(m->type==ix::WebSocketMessageType::Message){try{auto value=Json::parse(m->str);std::lock_guard lock(mutex_);if(incoming_.size()<64)incoming_.push_back(std::move(value));}catch(...){}}});ws->start();events_=std::move(ws);}
+void Session::update_stage(){Json live;{std::lock_guard lock(mutex_);live=state_.live;}if(live.is_null())return;std::string key;auto pk=live.value("pk",Json());if(pk.is_object()&&pk.value("state","")=="active")key="pk-"+pk.at("id").get<std::string>();else for(auto&g:live.value("guests",Json::array()))if(g.value("state","")=="approved"){key="guests";break;}
+ if(stage_&&stage_->connection_state()==sdk::ConnectionState::disconnected)close_stage();
+ if(key!=stage_key_){close_stage();if(!key.empty()){connect(true);stage_key_=key;}}
+}
+void Session::run(){auto heartbeat=std::chrono::steady_clock::now(),refresh=heartbeat;try{if(!token_.empty()){auto u=request("/api/v1/auth/me");std::lock_guard lock(mutex_);state_.user=u;}}catch(...){token_.clear();}
+ while(!closing_){std::function<void()>cmd;{std::lock_guard lock(mutex_);if(!commands_.empty()){cmd=std::move(commands_.front());commands_.pop_front();state_.busy=true;state_.error.clear();}}
+  if(cmd){try{cmd();}catch(const std::exception&e){std::lock_guard lock(mutex_);state_.error=e.what();}std::lock_guard lock(mutex_);state_.busy=false;}
+  try{
+   {std::lock_guard lock(mutex_);while(!incoming_.empty()){auto batch=std::move(incoming_.front());incoming_.pop_front();for(auto&e:batch){auto seq=e.value("seq",int64_t(0));if(seq<=sequence_)continue;sequence_=seq;state_.events.push_back(e);while(state_.events.size()>200)state_.events.erase(state_.events.begin());}}}
+   auto now=std::chrono::steady_clock::now();if(!broadcast_.empty()&&now>=heartbeat){heartbeat=now+std::chrono::seconds(3);bool connected=program_&&program_->connection_state()==sdk::ConnectionState::connected;Json c{{"connected",connected}};auto live=request(prefix+"broadcasts/"+broadcast_+"/heartbeat",&c);{std::lock_guard lock(mutex_);state_.live=live;state_.connected=connected;state_.state=live.at("broadcast").value("state","")=="live"?"直播中":"重连中";}
+    if(live.at("broadcast").value("state","")=="ended"){disconnect();}else{if(program_&&program_->connection_state()==sdk::ConnectionState::disconnected){program_->disconnect();connect(false);}update_stage();}
+   }
+   if(!token_.empty()&&now>=refresh){refresh=now+std::chrono::minutes(10);Json empty=Json::object();auto auth=request("/api/v1/auth/refresh",&empty);token_=auth.at("session_token");store_token();if(!broadcast_.empty())events_start();}
+  }catch(const std::exception&e){std::lock_guard lock(mutex_);state_.error=e.what();}
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+ }
+ if(!broadcast_.empty()){try{Json empty=Json::object();request(prefix+"broadcasts/"+broadcast_+"/stop",&empty);}catch(...){}}
+ disconnect();
+}
+}

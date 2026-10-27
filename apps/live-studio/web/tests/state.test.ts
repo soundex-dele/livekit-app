@@ -1,0 +1,3 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {acceptEvents,pkLabel} from '../src/state.ts';
+test('replayed events are ordered and never duplicate gifts',()=>{const e=(seq:number)=>({seq,kind:'gift',payload:{points:10},created:1});const out=acceptEvents(3,[e(5),e(3),e(4),e(5)]);assert.deepEqual(out.events.map(e=>e.seq),[4,5]);assert.equal(out.last,5);});
+test('PK countdown uses server deadline and does not become negative',()=>{const p={id:'p',a:'a',b:'b',state:'active',deadline:100,score_a:10,score_b:20,winner:''};assert.match(pkLabel(p,99000),/0:01/);assert.match(pkLabel(p,101000),/0:00/);});

@@ -38,3 +38,5 @@ AV Platform 的客户端应用仓库。
 两者可从各自 desktop 目录独立配置，也可通过根 CMake 统一构建。根选项 `AV_BUILD_CONFERENCE_DESKTOP` 默认开启，`AV_BUILD_PLAYER_DESKTOP` 默认关闭（需额外提供 FFmpeg 和 SDL 开发包）。`AV_SDK_SOURCE_DIR` 可覆盖同级 SDK 路径；根工程在添加产品前统一选择所需 SDK 引擎。应用测试由 `BUILD_TESTING` 控制，使用 `ctest --test-dir <build> -C Release --output-on-failure` 执行。
 
 根目录提供 Windows、Linux、macOS CMake 预设。macOS 预设默认关闭目前仅支持 Windows 的远控和传屏应用。自动化验证使用无窗口驱动；真实设备体验仍需人工验收。
+
+- [AV 直播伴侣](apps/live-studio/README.md)：自有平台直播、观看与互动；构建和运行默认关闭。
