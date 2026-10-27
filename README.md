@@ -26,7 +26,7 @@ AV Platform 的客户端应用仓库。
 
 ## 多业务组织
 
-每个产品位于 `apps/<业务>/<端>`，远控桌面端和 Web 端已经迁入该结构。后续传屏使用 `apps/screen-cast`；会议和播放器分别位于 `apps/conference/desktop`、`apps/player/desktop`。各 APP 独立构建发布，公共媒体能力由 SDK 提供。
+每个产品位于 `apps/<业务>/<端>`，远控桌面端和 Web 端已经迁入该结构。传屏位于 `apps/screen-cast`，会议和播放器分别位于 `apps/conference/desktop`、`apps/player/desktop`。各 APP 独立构建发布，公共媒体能力由 SDK 提供。
 
 客户端根 CMake 可编排产品；桌面端也可用 `cmake -S apps/remote-control/desktop -B out/remote-control-desktop` 独立配置（需 Windows、VS2022 和 vcpkg 静态工具链）。Web 命令在对应 APP 的 web 目录运行。完整构建使用聚合仓库的 `scripts/build/remote-control.ps1`。
 
@@ -37,4 +37,4 @@ AV Platform 的客户端应用仓库。
 
 两者可从各自 desktop 目录独立配置，也可通过根 CMake 统一构建。根选项 `AV_BUILD_CONFERENCE_DESKTOP` 默认开启，`AV_BUILD_PLAYER_DESKTOP` 默认关闭（需额外提供 FFmpeg 和 SDL 开发包）。`AV_SDK_SOURCE_DIR` 可覆盖同级 SDK 路径；根工程在添加产品前统一选择所需 SDK 引擎。应用测试由 `BUILD_TESTING` 控制，使用 `ctest --test-dir <build> -C Release --output-on-failure` 执行。
 
-根目录提供 Windows、Linux、macOS CMake 预设。macOS 预设默认关闭目前仅支持 Windows 的远控应用。自动化验证使用无窗口驱动；真实设备体验仍需人工验收。
+根目录提供 Windows、Linux、macOS CMake 预设。macOS 预设默认关闭目前仅支持 Windows 的远控和传屏应用。自动化验证使用无窗口驱动；真实设备体验仍需人工验收。

@@ -8,7 +8,7 @@
 
 ```powershell
 $env:VCPKG_ROOT = 'D:\vcpkg'
-cmake --preset windows-x64 -DAV_BUILD_REMOTE_CONTROL_DESKTOP=OFF
+cmake --preset windows-x64 -DAV_BUILD_REMOTE_CONTROL_DESKTOP=OFF -DAV_BUILD_SCREEN_CAST_DESKTOP=OFF
 cmake --build --preset windows-release --target livekit_conference_demo
 .\out\windows-x64\Release\livekit_conference_demo.exe
 ```

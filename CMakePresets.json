@@ -25,7 +25,8 @@
       "binaryDir": "${sourceDir}/out/linux-x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "AV_BUILD_REMOTE_CONTROL_DESKTOP": "OFF"
+        "AV_BUILD_REMOTE_CONTROL_DESKTOP": "OFF",
+        "AV_BUILD_SCREEN_CAST_DESKTOP": "OFF"
       },
       "condition": {
         "type": "equals",
@@ -41,7 +42,8 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_OSX_SYSROOT": "macosx",
         "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0",
-        "AV_BUILD_REMOTE_CONTROL_DESKTOP": "OFF"
+        "AV_BUILD_REMOTE_CONTROL_DESKTOP": "OFF",
+        "AV_BUILD_SCREEN_CAST_DESKTOP": "OFF"
       },
       "condition": {
         "type": "equals",
