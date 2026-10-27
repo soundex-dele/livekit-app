@@ -38,6 +38,7 @@ class Session {
   void stop();
   // Queue one operation for the supervisor; never wait on the UI thread.
   bool add_video();
+  bool enable_microphone();
   bool add_video(sdk::MediaSpec spec);
   bool remove_video(const std::string& sid);
   bool set_muted(const std::string& sid, bool muted);
@@ -52,6 +53,7 @@ class Session {
     std::string remove_sid;
     std::optional<sdk::MediaSpec> source;
     std::optional<bool> muted;
+    bool microphone=false;
   }; // empty SID adds video; otherwise mute or remove the indicated track
   std::optional<VideoCommand> video_command_;
   std::optional<ChatMessage> chat_command_;

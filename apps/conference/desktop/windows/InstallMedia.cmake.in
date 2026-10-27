@@ -1,0 +1,17 @@
+# Qt's deploy step handles Qt and MSVC. Resolve OpenSSL and other media DLLs
+# from the same dynamic-CRT vcpkg triplet and SDK output directory afterwards.
+file(GET_RUNTIME_DEPENDENCIES
+  EXECUTABLES "$<TARGET_FILE:livekit_conference_demo>"
+  DIRECTORIES "$<TARGET_FILE_DIR:livekit_conference_demo>"
+    "${CMAKE_INSTALL_PREFIX}/bin"
+    "@VCPKG_INSTALLED_DIR@/@VCPKG_TARGET_TRIPLET@/$<$<CONFIG:Debug>:debug/>bin"
+  PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
+  POST_EXCLUDE_REGEXES ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\].*"
+  RESOLVED_DEPENDENCIES_VAR _media_dlls
+  UNRESOLVED_DEPENDENCIES_VAR _missing_dlls)
+if(_missing_dlls)
+  message(FATAL_ERROR "Conference runtime DLLs are missing: ${_missing_dlls}")
+endif()
+foreach(_dll IN LISTS _media_dlls)
+  file(INSTALL "${_dll}" DESTINATION "${CMAKE_INSTALL_PREFIX}/bin" TYPE SHARED_LIBRARY)
+endforeach()
