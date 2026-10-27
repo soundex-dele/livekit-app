@@ -1,52 +1,63 @@
 cmake_minimum_required(VERSION 3.24)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(av_player_desktop VERSION 0.3.0 LANGUAGES C CXX)
+  project(av_player_desktop VERSION 0.4.0 LANGUAGES C CXX)
   include(CTest)
 endif()
+# Official shared Qt MSVC packages use the dynamic CRT. Set before SDK targets.
+if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Multimedia Svg)
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/NativeSDK.cmake")
 if(NOT TARGET LiveKit::Player)
   av_add_native_sdk(OFF ON)
 endif()
-# Isolate this shared SDL dependency from the RTC demo's static video-only SDL.
-set(LIVEKIT_PLAYER_SDL_ROOT "" CACHE PATH "Optional separate SDL2 development prefix")
-find_path(LIVEKIT_PLAYER_SDL_INCLUDE SDL.h HINTS "${LIVEKIT_PLAYER_SDL_ROOT}/include"
-  "${LIVEKIT_FFMPEG_ROOT}/include/SDL2" PATH_SUFFIXES SDL2 REQUIRED)
-find_library(LIVEKIT_PLAYER_SDL_LIBRARY NAMES SDL2 HINTS "${LIVEKIT_PLAYER_SDL_ROOT}/lib/x64"
-  "${LIVEKIT_PLAYER_SDL_ROOT}/lib" "${LIVEKIT_FFMPEG_ROOT}/lib" REQUIRED)
-include(FetchContent)
-FetchContent_Declare(imgui URL https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9b.tar.gz
-  URL_HASH SHA256=8e1bbc76c71d74fef2fb85db7e7ca8eba13d6a86623c54992b60162db554ffdb
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-FetchContent_MakeAvailable(imgui)
-add_library(livekit_player_imgui STATIC
-  ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp
-  ${imgui_SOURCE_DIR}/imgui_tables.cpp ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-  ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
-  ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer2.cpp)
-target_include_directories(livekit_player_imgui PUBLIC "${LIVEKIT_PLAYER_SDL_INCLUDE}"
-  ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends "${CMAKE_CURRENT_SOURCE_DIR}/../../../packages/native/imgui")
-target_link_libraries(livekit_player_imgui PUBLIC "${LIVEKIT_PLAYER_SDL_LIBRARY}")
-add_library(livekit_player_demo STATIC session.cpp ui.cpp subtitles.cpp)
-target_include_directories(livekit_player_demo PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(livekit_player_demo PUBLIC LiveKit::Player livekit_player_imgui)
-if(WIN32)
-  target_link_libraries(livekit_player_demo PRIVATE comdlg32)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+add_library(livekit_player_app STATIC
+  audio_output.cpp controller.cpp playlist.cpp settings.cpp video_widget.cpp window.cpp
+  subtitles.cpp resources.qrc)
+target_include_directories(livekit_player_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(livekit_player_app PUBLIC LiveKit::Player Qt6::Widgets Qt6::Multimedia Qt6::Svg)
+target_compile_features(livekit_player_app PUBLIC cxx_std_20)
+qt_add_executable(livekit_local_player WIN32 MACOSX_BUNDLE main.cpp)
+target_link_libraries(livekit_local_player PRIVATE livekit_player_app utoolkit_logging)
+set_target_properties(livekit_local_player PROPERTIES
+  MACOSX_BUNDLE_BUNDLE_NAME "LiveKit Player"
+  MACOSX_BUNDLE_GUI_IDENTIFIER "org.livekit.localplayer"
+  MACOSX_BUNDLE_BUNDLE_VERSION "0.4.0")
+livekit_player_runtime(livekit_local_player)
+include(GNUInstallDirs)
+if(APPLE)
+  # Never feed an already-relocated dependency tree back into macdeployqt.
+  # Only this generated app bundle is replaced; preferences live outside it.
+  install(CODE "file(REMOVE_RECURSE \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/livekit_local_player.app\")")
 endif()
-add_executable(livekit_local_player "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
-target_link_libraries(livekit_local_player PRIVATE livekit_player_demo utoolkit_logging)
-
-# SDL may live in a separate development package rather than the FFmpeg prefix.
-function(av_player_runtime target)
-  livekit_player_runtime(${target})
-  if(WIN32)
-    find_file(AV_PLAYER_SDL_DLL SDL2.dll HINTS "${LIVEKIT_PLAYER_SDL_ROOT}/lib/x64"
-      "${LIVEKIT_PLAYER_SDL_ROOT}/bin" "${LIVEKIT_FFMPEG_ROOT}/bin" REQUIRED)
-    add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${AV_PLAYER_SDL_DLL}" "$<TARGET_FILE_DIR:${target}>" VERBATIM)
-  endif()
-endfunction()
-av_player_runtime(livekit_local_player)
+install(TARGETS livekit_local_player BUNDLE DESTINATION . RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+qt_generate_deploy_app_script(TARGET livekit_local_player OUTPUT_SCRIPT player_deploy_script)
+install(SCRIPT ${player_deploy_script})
+# macdeployqt selects cocoa only; keep the documented --hidden mode deployable.
+if(APPLE)
+  file(REAL_PATH "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}/platforms/libqoffscreen.dylib" _player_offscreen_plugin)
+  install(CODE "file(REMOVE \"\${CMAKE_INSTALL_PREFIX}/livekit_local_player.app/Contents/PlugIns/platforms/libqoffscreen.dylib\")" COMPONENT PlayerPostDeploy)
+  install(FILES "${_player_offscreen_plugin}" RENAME libqoffscreen.dylib
+    DESTINATION livekit_local_player.app/Contents/PlugIns/platforms COMPONENT PlayerPostDeploy)
+elseif(WIN32)
+  install(FILES "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}/platforms/qoffscreen$<$<CONFIG:Debug>:d>.dll"
+    DESTINATION "${QT6_INSTALL_PLUGINS}/platforms" COMPONENT PlayerPostDeploy)
+endif()
+if(APPLE)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  # Homebrew Qt/codec binaries can retain absolute IDs and rpaths after macdeployqt.
+  install(CODE "execute_process(COMMAND \"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/check-player-macos-bundle.py\" \"\${CMAKE_INSTALL_PREFIX}/livekit_local_player.app\" --fix COMMAND_ERROR_IS_FATAL ANY)" COMPONENT PlayerPostDeploy)
+endif()
+if(WIN32)
+  install(DIRECTORY "${LIVEKIT_FFMPEG_ROOT}/bin/" DESTINATION ${CMAKE_INSTALL_BINDIR} FILES_MATCHING PATTERN "*.dll")
+endif()
 if(BUILD_TESTING)
+  find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   add_executable(livekit_player_subtitle_tests tests/subtitle_tests.cpp subtitles.cpp)
   target_include_directories(livekit_player_subtitle_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   target_compile_features(livekit_player_subtitle_tests PRIVATE cxx_std_20)
@@ -60,15 +71,15 @@ if(BUILD_TESTING)
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/player_fixtures.cmake")
   set_tests_properties(player_app_fixtures PROPERTIES FIXTURES_SETUP player_app_media TIMEOUT 30)
   add_test(NAME local_player_output COMMAND livekit_local_player "${CMAKE_CURRENT_BINARY_DIR}/fixtures/av.mp4" --auto-exit --hidden)
-  set_tests_properties(local_player_output PROPERTIES FIXTURES_REQUIRED player_app_media TIMEOUT 15
-    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;SDL_RENDER_DRIVER=software")
-  add_test(NAME local_player_empty COMMAND livekit_local_player --hidden --frames 5)
-  set_tests_properties(local_player_empty PROPERTIES TIMEOUT 15
-    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;SDL_RENDER_DRIVER=software")
+  set_tests_properties(local_player_output PROPERTIES FIXTURES_REQUIRED player_app_media TIMEOUT 20 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME local_player_empty COMMAND livekit_local_player --hidden --frames 5 --screenshot "${CMAKE_CURRENT_BINARY_DIR}/empty.png")
+  set_tests_properties(local_player_empty PROPERTIES TIMEOUT 15 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   add_executable(livekit_player_ui_tests tests/player_ui_tests.cpp)
-  target_link_libraries(livekit_player_ui_tests PRIVATE livekit_player_demo)
-  av_player_runtime(livekit_player_ui_tests)
-  add_test(NAME local_player_ui COMMAND livekit_player_ui_tests "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
-  set_tests_properties(local_player_ui PROPERTIES FIXTURES_REQUIRED player_app_media TIMEOUT 20
-    ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy;SDL_RENDER_DRIVER=software")
+  target_link_libraries(livekit_player_ui_tests PRIVATE livekit_player_app Qt6::Test utoolkit_logging)
+  target_compile_definitions(livekit_player_ui_tests PRIVATE PLAYER_FIXTURES="${CMAKE_CURRENT_BINARY_DIR}/fixtures" PLAYER_SCREENSHOTS="${CMAKE_CURRENT_BINARY_DIR}/screenshots")
+  livekit_player_runtime(livekit_player_ui_tests)
+  add_test(NAME local_player_ui COMMAND livekit_player_ui_tests)
+  set_tests_properties(local_player_ui PROPERTIES FIXTURES_REQUIRED player_app_media TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME local_player_ui_hidpi COMMAND livekit_player_ui_tests layout)
+  set_tests_properties(local_player_ui_hidpi PROPERTIES TIMEOUT 20 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2")
 endif()
