@@ -1,6 +1,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <imgui.h>
+#include <av/locale.hpp>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include "features/ui.hpp"
@@ -10,7 +11,7 @@ int main(){try{
   auto check=[](bool ok,const char* message){if(!ok)throw std::runtime_error(message);};
   SDL_SetMainReady();if(SDL_Init(SDL_INIT_VIDEO))throw std::runtime_error(SDL_GetError());
   auto*w=SDL_CreateWindow("test",0,0,880,680,SDL_WINDOW_HIDDEN);auto*r=SDL_CreateRenderer(w,-1,SDL_RENDERER_SOFTWARE);if(!r)throw std::runtime_error(SDL_GetError());
-  ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::GetIO().Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc",18,nullptr,ImGui::GetIO().Fonts->GetGlyphRangesChineseFull());ImGui_ImplSDL2_InitForSDLRenderer(w,r);ImGui_ImplSDLRenderer2_Init(r);
+  ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;av::ui::load_chinese_font();ImGui_ImplSDL2_InitForSDLRenderer(w,r);ImGui_ImplSDLRenderer2_Init(r);
   screen_cast::View view;view.displays={{"primary","Main",0,0,1920,1080,true},{"left","Portrait",-1080,0,1080,1920,false}};
   auto* pixels=SDL_CreateRGBSurfaceWithFormat(0,320,180,32,SDL_PIXELFORMAT_ARGB8888);check(pixels!=nullptr,"surface allocation");
   SDL_FillRect(pixels,nullptr,SDL_MapRGB(pixels->format,40,100,160));auto*texture=SDL_CreateTextureFromSurface(r,pixels);SDL_FreeSurface(pixels);check(texture!=nullptr,"preview texture");

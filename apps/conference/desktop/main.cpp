@@ -35,7 +35,7 @@ int main() {
   try {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) throw std::runtime_error(SDL_GetError());
     float scale = ui_scale(0);
-    window = SDL_CreateWindow("LiveKit Conference", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+    window = SDL_CreateWindow("视频会议", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
       static_cast<int>(1100 * scale), static_cast<int>(720 * scale), SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!window) throw std::runtime_error(SDL_GetError());
     SDL_SetWindowMinimumSize(window, 640, 480);
@@ -73,7 +73,10 @@ int main() {
         const auto action = view.draw(renderer, snapshot);
         if (action == demo::Action::Leave) session.stop();
         if (action == demo::Action::AddVideo && !closing) session.add_video();
+        if (action == demo::Action::AddSource && !closing && !session.add_video(view.source)) view.error = "当前无法添加视频，请等待连接恢复或其他操作完成。";
+        if (action == demo::Action::Mute && !closing) session.set_muted(view.remove_video_sid, view.mute_value);
         if (action == demo::Action::RemoveVideo && !closing) session.remove_video(view.remove_video_sid);
+        if (action == demo::Action::SendChat && !closing && session.send_chat(view.chat_text.data())) view.chat_text.fill(0);
         if (action == demo::Action::Join && !closing) {
           try { session.start(view.options()); }
           catch (const std::exception& e) { view.error = e.what(); }

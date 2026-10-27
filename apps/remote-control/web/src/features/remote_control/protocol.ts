@@ -1,6 +1,15 @@
 export const topic = 'av.remote-control.v1';
 export interface Grant { id:string; grant_id:string; epoch:number; state:string; host_identity:string; controller_identity:string; credential?:string; lease_remaining_ms:number }
-export interface Layout { v:1; type:'layout'; grant_id:string; epoch:number; layout_version:number; width:number; height:number; active:boolean }
+export interface Layout { v:1; type:'layout'; grant_id:string; epoch:number; layout_version:number; width:number; height:number; active:boolean; text_input?:boolean; text_result?:{id:number;accepted:boolean;reason:string} }
+export function remoteText(value:string):string {
+  const text=value.replace(/\r\n?/g,'\n');
+  const scalars=Array.from(text);
+  if(!scalars.length)throw Error('请先输入要发送的文字。');
+  if(scalars.length>256)throw Error('每次最多发送 256 个字符，请分段发送。');
+  if(scalars.some(c=>{const n=c.codePointAt(0)!;return (n>=0xd800&&n<=0xdfff)||(n<32&&n!==9&&n!==10)||(n>=127&&n<=159);}))
+    throw Error('文字中含有不支持的控制字符，请检查后重试。');
+  return text;
+}
 export function point(rect:{left:number;top:number;width:number;height:number},width:number,height:number,x:number,y:number){
   if(width<=0||height<=0||rect.width<=0||rect.height<=0)return null;
   const scale=Math.min(rect.width/width,rect.height/height),w=width*scale,h=height*scale;

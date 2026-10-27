@@ -10,7 +10,7 @@
 namespace {
 struct Options {
   std::string path, screenshot;
-  bool auto_exit = false, hidden = false;
+  bool auto_exit = false, hidden = false, verbose = false;
   int frames = 0;
 };
 void check(bool ok) { if (!ok) throw std::runtime_error(SDL_GetError()); }
@@ -33,7 +33,7 @@ int run(const Options& options) {
     check(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) == 0);
     float dpi = 96; if (SDL_GetDisplayDPI(0, &dpi, nullptr, nullptr) != 0) dpi = 96;
     const float scale = std::clamp(dpi / 96, 1.0f, 2.5f);
-    window = SDL_CreateWindow("AV Player", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+    window = SDL_CreateWindow("本地播放器", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         static_cast<int>(1080 * scale), static_cast<int>(740 * scale), SDL_WINDOW_RESIZABLE |
         SDL_WINDOW_ALLOW_HIGHDPI | (options.hidden ? SDL_WINDOW_HIDDEN : 0));
     check(window != nullptr);
@@ -60,7 +60,10 @@ int run(const Options& options) {
           ImGui_ImplSDL2_ProcessEvent(&event);
           if (event.type == SDL_QUIT || (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE)) session.close();
           if (event.type == SDL_DROPFILE) {
-            session.open(event.drop.file); SDL_free(event.drop.file);
+            if (player_demo::Subtitles::accepts(event.drop.file)) {
+              if (!session.load_subtitles(event.drop.file)) view.show_subtitle_settings();
+            } else session.open(event.drop.file);
+            SDL_free(event.drop.file);
           }
           if (event.type != SDL_KEYDOWN || event.key.repeat || ImGui::GetIO().WantTextInput ||
               ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) continue;
@@ -71,6 +74,7 @@ int run(const Options& options) {
             case SDLK_s: session.stop(); break;
             case SDLK_m: session.muted = !session.muted; break;
             case SDLK_f: view.toggle_fullscreen(window); break;
+            case SDLK_v: if (session.subtitles.size()) session.subtitles.enabled = !session.subtitles.enabled; break;
             case SDLK_ESCAPE: if (view.fullscreen) view.toggle_fullscreen(window); else session.close(); break;
             case SDLK_o: if (event.key.keysym.mod & KMOD_CTRL) view.browse(session, window); break;
           }
@@ -102,21 +106,22 @@ int run(const Options& options) {
 }
 int entry(const std::vector<std::string>& args) {
   try {
-    utoolkit::logging::Logger::GetInstance().Initialize(
-        "cli_test", "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%t] %v",
-        utoolkit::logging::LogLevel::Trace);
     Options options;
     for (size_t i = 1; i < args.size(); ++i) {
       if (args[i] == "--auto-exit") options.auto_exit = true;
       else if (args[i] == "--hidden") options.hidden = true;
+      else if (args[i] == "--verbose") options.verbose = true;
       else if (args[i] == "--screenshot" && i + 1 < args.size()) options.screenshot = args[++i];
       else if (args[i] == "--frames" && i + 1 < args.size()) options.frames = std::stoi(args[++i]);
       else if (args[i] == "--help") {
-        std::cout << "Usage: livekit_local_player [local-file] [--auto-exit] [--hidden] [--screenshot output.bmp] [--frames count]\n"; return 0;
+        std::cout << "用法：livekit_local_player [本地文件] [--auto-exit] [--hidden] [--screenshot 截图.bmp] [--frames 帧数] [--verbose]\n"; return 0;
       } else if (options.path.empty() && !args[i].starts_with("--")) options.path = args[i];
-      else throw std::invalid_argument("Unknown argument: " + args[i]);
+      else throw std::invalid_argument("未知参数：" + args[i]);
     }
-    if (options.auto_exit && options.path.empty()) throw std::invalid_argument("--auto-exit requires a media file");
+    if (options.auto_exit && options.path.empty()) throw std::invalid_argument("--auto-exit 需要指定媒体文件");
+    utoolkit::logging::Logger::GetInstance().Initialize(
+        "player", "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%t] %v",
+        options.verbose ? utoolkit::logging::LogLevel::Trace : utoolkit::logging::LogLevel::Warn);
     return run(options);
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
 }

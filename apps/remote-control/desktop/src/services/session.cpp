@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <future>
 #include <stdexcept>
+#include <iostream>
+#include <syncstream>
 using namespace std::chrono_literals;
 namespace remote_app {
 Session::Session(bool fixture,std::shared_ptr<sdk::ControlInputSink> sink):fixture_(fixture){
@@ -54,12 +56,19 @@ void Session::run(std::string url){
   {std::lock_guard lock(mutex_);snapshot_.state="ended";snapshot_.finished=true;}
 }
 void Session::media(std::string url,std::string id,std::string credential){
+  // Fixture diagnostics contain timing and envelope metadata only, never text,
+  // input contents, credentials or media tokens. Production does not emit them.
+  auto trace=[enabled=fixture_,began=sdk::ControlClock::now()](const char* event,sdk::Json fields=sdk::Json::object()){
+    if(!enabled)return;fields["event"]=event;fields["elapsed_ms"]=std::chrono::duration_cast<std::chrono::milliseconds>(sdk::ControlClock::now()-began).count();
+    std::osyncstream(std::cerr)<<fields.dump()<<'\n';
+  };
   try{
     sdk::Json empty=sdk::Json::object();auto connection=request(url,"/api/v1/remote-control/control-grants/"+id+"/connect",credential,&empty);if(stop_)return;
     sdk::RoomCallback cb;
     cb.on_disconnected=[this](int){control_->stop("media_disconnected");stop_=true;};
     cb.on_participant_disconnected=[this](const sdk::RemoteParticipant& p){std::string identity;{std::lock_guard lock(mutex_);identity=grant_.controller_identity;}if(p.identity()==identity){control_->stop("controller_disconnected");stop_=true;}};
-    cb.on_data_received=[this](const auto& bytes,const auto& params){
+    cb.on_data_received=[this,trace](const auto& bytes,const auto& params){
+      trace("data_received",{{"bytes",bytes.size()},{"topic",params.topic},{"reliable",params.reliable}});
       if(params.topic!=sdk::remote_control_topic)return;
       bool overflow=false;{std::lock_guard lock(mutex_);if(bytes.size()>4096||incoming_.size()>=256)overflow=true;else incoming_.emplace_back(bytes,params);}
       if(overflow){control_->stop("input_queue_overflow");stop_=true;}
@@ -67,11 +76,14 @@ void Session::media(std::string url,std::string id,std::string credential){
     auto room=std::make_shared<sdk::Room>(cb);{std::lock_guard lock(mutex_);room_=room;}
     if(stop_)return;
     sdk::RoomOptions options;options.connect_timeout=10;options.audio_playout=false;
+    // A new media connection must never silently restore a previous control grant.
+    options.reconnect.enabled=false;
     auto layout=fixture_?sdk::ControlLayout{1,0,0,1280,720}:sdk::primary_control_layout();
     sdk::MediaSpec screen;screen.width=1280;screen.height=std::max(2,static_cast<int>(1280.0*layout.height/layout.width)/2*2);screen.fps=20;
     if(fixture_)screen.demo=true;else screen.capture=sdk::CaptureKind::screen;
     options.media={screen};
     room->join_with_token(connection.at("media_url"),connection.at("media_token"),options,cancellation_.get_token());
+    trace("room_joined");
     if(stop_){room->request_stop();room->wait();return;}
     sdk::ControlGrant grant;{std::lock_guard lock(mutex_);grant=grant_;}
     control_->authorize(grant,layout);
@@ -81,9 +93,9 @@ void Session::media(std::string url,std::string id,std::string credential){
       std::deque<std::pair<std::vector<uint8_t>,sdk::DataReceiveParams>> packets;
       {std::lock_guard lock(mutex_);grant=grant_;packets.swap(incoming_);}
       if(!control_->renew(grant)){throw std::runtime_error(control_->reason());}
-      for(auto&[bytes,params]:packets)control_->receive(bytes,params);
+      for(auto&[bytes,params]:packets){auto accepted=control_->receive(bytes,params);trace("control_packet",{{"accepted",accepted},{"active",control_->active()}});}
       if(!control_->active())throw std::runtime_error(control_->reason());
-      while(!sends.empty()&&sends.front().wait_for(0ms)==std::future_status::ready){sends.front().get();sends.pop_front();}
+      while(!sends.empty()&&sends.front().wait_for(0ms)==std::future_status::ready){sends.front().get();sends.pop_front();trace("status_sent");}
       if(sends.size()>=8)throw std::runtime_error("Control status send queue stalled");
       if(sdk::ControlClock::now()>=next){
         if(!fixture_){auto current=sdk::primary_control_layout();current.version=layout.version;if(current!=layout){current.version++;layout=current;control_->set_layout(layout);}}
@@ -93,6 +105,6 @@ void Session::media(std::string url,std::string id,std::string credential){
       std::this_thread::sleep_for(10ms);
     }
     control_->stop("media_ended");room->request_stop();room->wait();stop_=true;
-  }catch(const std::exception&e){control_->stop("media_error");stop_=true;std::lock_guard lock(mutex_);snapshot_.error=e.what();}
+  }catch(const std::exception&e){trace("media_failed",{{"reason",control_->reason()}});control_->stop("media_error");stop_=true;std::lock_guard lock(mutex_);snapshot_.error=e.what();}
 }
 }

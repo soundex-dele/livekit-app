@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     auto second_video = second.local_participant().publish_track(video).get();
     until([&] { auto s = viewer.snapshot(); return s.participants.size() == 3 && s.frames.contains(first_video.sid()) && s.frames.contains(second_video.sid()) && s.received_frames > 120; }, "Two simultaneous video tracks missing");
     first_video.set_muted(true).get();
-    until([&] { for (const auto& t : demo::tiles(viewer.snapshot())) if (t.id == first_video.sid() && t.status == "Video muted") return true; return false; }, "Remote mute missing");
+    until([&] { for (const auto& t : demo::tiles(viewer.snapshot())) if (t.id == first_video.sid() && t.status == "视频已关闭") return true; return false; }, "Remote mute missing");
     first_video.set_muted(false).get();
     until([&] { for (const auto& t : demo::tiles(viewer.snapshot())) if (t.id == first_video.sid() && t.frame) return true; return false; }, "Remote unmute missing");
     second.local_participant().unpublish_track(second_video.sid()).get();
@@ -58,7 +58,8 @@ int main(int argc, char** argv) {
     check(viewer.snapshot().frames.empty() && viewer.snapshot().participants.empty(), "Old state after disconnect");
     view = options("Viewer");
     // Fresh join with test publishing uses LocalParticipant::publish_track futures.
-    view.media = {video, video, tone}; viewer.start(view);
+    auto preview_video = video; preview_video.local_preview = true;
+    view.media = {preview_video, video, tone}; viewer.start(view);
     until([&] { auto s = viewer.snapshot(); return s.state == demo::State::Connected && s.frames.contains(first_video.sid()); }, "Viewer reuse");
     auto local_videos = [&] {
       std::vector<sdk::TrackInfo> videos; const auto s = viewer.snapshot();
@@ -69,6 +70,11 @@ int main(int argc, char** argv) {
     auto remote_tracks = [&] { auto p = first.participant_by_identity("Viewer"); return p ? p->info().tracks : std::vector<sdk::TrackInfo>{}; };
     until([&] { return remote_tracks().size() == 3 && local_videos().size() == 2; }, "Demo multiple publications missing");
     auto initial = local_videos();
+    until([&] { const auto s = viewer.snapshot(); return s.frames.contains("local-" + initial[0].client_id); }, "Local preview missing");
+    check(viewer.set_muted(initial[0].sid, true), "Local mute rejected");
+    until([&] { for (const auto& t : remote_tracks()) if (t.sid == initial[0].sid && t.muted) return !viewer.snapshot().changing_video; return false; }, "Local mute not delivered");
+    check(viewer.set_muted(initial[0].sid, false), "Local unmute rejected");
+    until([&] { for (const auto& t : remote_tracks()) if (t.sid == initial[0].sid && !t.muted) return !viewer.snapshot().changing_video; return false; }, "Local unmute not delivered");
     check(initial[0].sid != initial[1].sid && initial[0].name != initial[1].name, "Video identities are not distinct");
     try {
       until([&] { std::lock_guard lock(received_mutex); return received[initial[0].sid] >= 3 && received[initial[1].sid] >= 3; }, "Same participant videos did not both decode");
@@ -101,7 +107,7 @@ int main(int argc, char** argv) {
     until([&] { const auto tracks = remote_tracks(); return tracks.size() == 1 && tracks[0].kind == sdk::TrackKind::audio && local_videos().empty(); }, "Stopping videos affected tone");
     check(viewer.add_video(), "Restart video rejected");
     until([&] { return !viewer.snapshot().changing_video && local_videos().size() == 1; }, "Restart video timeout");
-    auto restarted = local_videos().front(); check(restarted.name == "Test video 4", "Reused video name");
+    auto restarted = local_videos().front(); check(restarted.name == "测试视频 4", "Reused video name");
     until([&] { std::lock_guard lock(received_mutex); return received[restarted.sid] >= 3; }, "Restarted video did not decode");
     check(viewer.add_video(), "Add before stop rejected");
     viewer.stop(); until([&] { return viewer.snapshot().finished; }, "Reused viewer stop");

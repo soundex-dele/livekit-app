@@ -43,6 +43,14 @@ int main(int argc, char** argv) {
       check(demo::tiles(state).size() == 3, "roster tile count");
       state.frames["TR_two"] = pixels("TR_two");
       demo::View view;
+      view.cameras = {{"测试摄像头", "fixture-camera"}}; view.camera = true; view.microphone = true;
+      auto devices = view.options();
+      check(devices.microphone && devices.media.size() == 1 && devices.media[0].capture == demo::sdk::CaptureKind::camera && devices.media[0].local_preview,
+        "Camera/microphone selection not mapped to SDK");
+      view.screens = {{"fixture-screen", "测试副屏", -1080, 0, 1080, 1920, false}};
+      auto screen = view.screen_spec();
+      check(screen.screen_id == "fixture-screen" && screen.width == 1080 && screen.height == 1920 && screen.local_preview, "Screen sharing selection");
+      view.camera = false; view.microphone = false;
       view.video_count = 3; view.tone = true;
       auto publishing = view.options();
       check(publishing.media.size() == 4 && publishing.media[0].video && publishing.media[2].video && !publishing.media[3].video, "Multiple videos and independent tone");
@@ -53,12 +61,17 @@ int main(int argc, char** argv) {
       alice.tracks[0].name = "Test video 1"; alice.tracks.push_back(extra);
       local.tracks = alice.tracks; local.tracks[0].sid = "TR_local1"; local.tracks[1].sid = "TR_local2";
       state.update(local, {alice, bob, guest}); state.frames[extra.sid] = pixels(extra.sid);
+      state.chat.append({"1", "alice", "爱丽丝", "大家好，欢迎参加会议。\n这里可以发送多行中文消息。"});
+      state.chat.append({"2", "viewer", "我", "收到，我们开始吧。", demo::ChatStatus::Sent});
+      state.chat.append({"3", "viewer", "我", "这条消息的发送结果尚未确认。", demo::ChatStatus::Unconfirmed});
       check(demo::tiles(state).size() == 4 && demo::tiles(state)[0].label == "Alice / Test video 1" && demo::tiles(state)[1].label == "Alice / Test video 2", "Same participant video labels");
       auto render = [&](demo::Snapshot snapshot) {
         ImGui_ImplSDLRenderer2_NewFrame(); ImGui_ImplSDL2_NewFrame(); ImGui::NewFrame();
         view.draw(renderer, snapshot); ImGui::Render(); SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); SDL_RenderClear(renderer);
         demo::render_draw_data(renderer);
       };
+      check(ImGui::GetIO().Fonts->Build(), "Chinese font atlas");
+      check(ImGui::GetIO().FontDefault->FindGlyphNoFallback(0x4f1a) != nullptr, "Chinese meeting glyph");
       render(state); render(state);
       check(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, buffer.data(), 1100 * 4) == 0, "ImGui readback");
       size_t red = 0; for (auto c : buffer) if (((c >> 16) & 255) > 220 && ((c >> 8) & 255) < 35 && (c & 255) < 35) ++red;
@@ -75,7 +88,7 @@ int main(int argc, char** argv) {
       ImGui_ImplSDLRenderer2_DestroyFontsTexture(); demo::apply_style(1, 2);
       render(state); render(state);
       check(std::abs(ImGui::GetIO().DisplayFramebufferScale.x - 2) < .01f, "Retina framebuffer scale");
-      check(std::abs(ImGui::GetIO().FontDefault->FontSize * ImGui::GetIO().FontGlobalScale - 13) < .01f,
+      check(std::abs(ImGui::GetIO().FontDefault->FontSize * ImGui::GetIO().FontGlobalScale - 16) < .01f,
         "Retina must preserve logical font size");
       std::vector<uint32_t> retina_buffer(2200 * 1440);
       check(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888,
@@ -96,9 +109,12 @@ int main(int argc, char** argv) {
       SDL_DestroyTexture(retina);
       ImGui_ImplSDLRenderer2_DestroyFontsTexture(); demo::apply_style(1);
       alice.tracks[0].muted = true; state.update(local, {alice, bob, guest});
-      check(demo::tiles(state)[0].status == "Video muted", "mute placeholder"); render(state);
+      check(demo::tiles(state)[0].status == "视频已关闭", "mute placeholder"); render(state);
       alice.tracks.erase(alice.tracks.begin()); state.update(local, {alice, bob, guest});
       check(!state.frames.contains("TR_one") && state.frames.contains("TR_three"), "Stopping one stream removed another");
+      state.state = demo::State::Reconnecting; render(state);
+      check(std::string(demo::state_name(state.state)) == "正在重连", "Recovery status");
+      state.state = demo::State::Connected;
       state.changing_video = true; render(state); state.changing_video = false;
       state.update(local, {bob, guest}); check(!state.frames.contains("TR_one"), "departed pixels retained"); render(state);
       SDL_SetWindowSize(window, 640, 480); render(state);

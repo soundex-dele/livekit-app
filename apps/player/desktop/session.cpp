@@ -21,11 +21,20 @@ void Session::command(Operation kind, std::future<void> future) {
 }
 void Session::open(const std::string& path) {
   if (busy() || closing_ || path.empty()) return;
+  subtitles.clear(); subtitle_error.clear();
   reset_output(true);
   if (audio_) { SDL_CloseAudioDevice(audio_); audio_ = 0; }
   error_.clear(); warning_.clear();
   opening_path_ = path;
   opening_ = player_.open(path); operation_ = Operation::open;
+}
+bool Session::load_subtitles(const std::string& path) {
+  const auto state = snapshot().state;
+  if (busy() || closing_ || state == sdk::PlayerState::closed || state == sdk::PlayerState::failed) {
+    subtitle_error = "请先打开媒体文件，并等待当前操作完成。"; return false;
+  }
+  try { subtitles.load(path); subtitle_error.clear(); return true; }
+  catch (const std::exception& e) { subtitle_error = e.what(); return false; }
 }
 void Session::toggle_play() {
   if (busy() || closing_) return;
@@ -60,6 +69,7 @@ void Session::stop() {
 }
 void Session::close() {
   if (closing_) return;
+  subtitles.clear(); subtitle_error.clear();
   closing_ = true; after_ = {};
   reset_output(true);
   // close interrupts an in-flight open and is queued after any current command.

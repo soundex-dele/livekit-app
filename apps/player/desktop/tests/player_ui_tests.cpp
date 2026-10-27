@@ -4,6 +4,7 @@
 #include "imgui_impl_sdlrenderer2.h"
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 
 namespace {
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -56,14 +57,47 @@ int main(int argc, char** argv) {
       const auto position = session.snapshot().position_us;
       SDL_Delay(35); render();
       require(session.snapshot().position_us == position && session.texture(), "paused picture or clock changed");
-      session.seek(1200000); wait([&] { return !session.busy(); });
-      require(!session.texture() && session.snapshot().state == player_demo::sdk::PlayerState::paused, "seek retained stale image");
+      session.seek(1200000); wait([&] { return !session.busy() && session.texture(); });
+      require(session.snapshot().state == player_demo::sdk::PlayerState::paused && session.snapshot().position_us == 1200000,
+        "paused target preview changed state or position");
+      SDL_Delay(40); render();
+      require(session.texture() && session.snapshot().position_us == 1200000, "preview did not retain paused target");
+      {
+        const auto subtitle_path = fixtures / "captions.srt";
+        { std::ofstream subtitles(subtitle_path, std::ios::binary);
+          subtitles << "1\n00:00:01,000 --> 00:00:02,000\n中文字幕：播放与暂停同步\nEnglish subtitles stay in sync.\n"; }
+        require(session.load_subtitles(file("captions.srt")), "Subtitle load failed");
+        session.subtitles.enabled = false; render();
+        std::vector<uint32_t> without(1080 * 740), with(1080 * 740);
+        require(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, without.data(), 1080 * 4) == 0, "subtitle baseline");
+        session.subtitles.enabled = true; render();
+        require(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, with.data(), 1080 * 4) == 0, "subtitle readback");
+        int changed = 0;
+        for (int y = 200; y < 500; ++y) for (int x = 30; x < 1050; ++x)
+          if (with[y * 1080 + x] != without[y * 1080 + x]) ++changed;
+        require(changed > 1000, "Subtitles were not drawn over paused video");
+        auto* image = SDL_CreateRGBSurfaceWithFormatFrom(with.data(), 1080, 740, 32, 1080 * 4, SDL_PIXELFORMAT_ARGB8888);
+        require(image != nullptr, "subtitle screenshot surface");
+        const auto saved = SDL_SaveBMP(image, "player-subtitles.bmp"); SDL_FreeSurface(image);
+        require(saved == 0, "subtitle screenshot save");
+        require(!session.load_subtitles(file("missing.srt")) && !session.subtitle_error.empty() && session.subtitles.size() == 1,
+          "Bad subtitle file interrupted playback or destroyed captions");
+        require(session.snapshot().state == player_demo::sdk::PlayerState::paused && session.texture(), "Subtitle error affected playback");
+        session.subtitles.delay_ms = 500;
+        require(session.subtitles.text_at(session.snapshot().position_us).empty(), "Subtitle delay did not follow current position");
+        session.subtitles.delay_ms = 0;
+        session.seek(500000); wait([&] { return !session.busy() && session.texture(); });
+        require(session.subtitles.text_at(session.snapshot().position_us).empty(), "Seek did not clear inactive cue");
+        session.seek(1200000); wait([&] { return !session.busy() && session.texture(); });
+        require(!session.subtitles.text_at(session.snapshot().position_us).empty(), "Seek did not restore active cue");
+      }
       session.muted = true; session.volume = .25f;
       session.toggle_play(); wait([&] { return !session.busy() && session.texture(); });
       require(session.snapshot().position_us >= 1200000, "seek target not applied");
       session.stop(); wait([&] { return !session.busy(); });
       require(!session.texture() && session.snapshot().position_us == 0, "stop failed to clear output");
       session.open(file("audio.wav")); wait([&] { return !session.busy(); });
+      require(session.subtitles.size() == 0 && session.subtitle_error.empty(), "File switch retained subtitles");
       require(session.snapshot().media.has_audio && !session.snapshot().media.has_video && !session.texture(), "file switch retained video");
       wait([&] { return session.drained(); });
       session.open(file("invalid.mp4")); wait([&] { return !session.busy(); });

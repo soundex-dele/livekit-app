@@ -31,6 +31,7 @@ void Session::run(std::string url,std::string code,sdk::ScreenCaptureDevice disp
     sdk::RoomCallback cb;cb.on_disconnected=[this](int){stop_=true;};cb.on_participant_disconnected=[this](const sdk::RemoteParticipant&){stop_=true;};
     room=std::make_shared<sdk::Room>(cb);{std::lock_guard lock(mutex_);room_=room;}
     sdk::RoomOptions opts;opts.subscribe=false;opts.audio_playout=false;opts.connect_timeout=10;
+    opts.reconnect.enabled=false; // Both clients end the one-use business session on disconnect.
     auto size=sdk::screen_capture_size(display.width,display.height);sdk::MediaSpec screen;screen.width=size.width;screen.height=size.height;screen.fps=15;screen.local_preview=true;
     if(fixture_)screen.demo=true;else{screen.capture=sdk::CaptureKind::screen;screen.screen_id=display.id;}
     opts.media={screen};opts.video_frame_handler=[this](const sdk::VideoFrame& frame){if(stop_)return;auto copy=std::make_shared<sdk::VideoFrame>(frame);std::lock_guard lock(mutex_);if(!stop_)snapshot_.preview=std::move(copy);};

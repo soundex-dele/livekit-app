@@ -1,6 +1,12 @@
 # ImGui 多人会议观看客户端
 
-基于 Dear ImGui v1.91.9b 和 SDL2 的桌面客户端，支持 Windows 和 macOS 构建，界面使用英文。客户端在可滚动的视频网格中展示多位参与者，并播放远端音频。同一参与者可同时发布多路生成的测试视频，以及独立的 440 Hz 测试音调，方便打开多个实例演示会议，无需摄像头、麦克风或 FFmpeg。当前未实现自动重连、屏幕共享和聊天。
+基于 Dear ImGui v1.91.9b 和 SDL2 的桌面客户端，支持 Windows 和 macOS 构建，界面使用中文。客户端在可滚动的视频网格中展示多位参与者，并播放远端音频。同一参与者可同时发布多路生成的测试视频，以及独立的 440 Hz 测试音调，方便打开多个实例演示会议，无需摄像头、麦克风或 FFmpeg。已增加摄像头选择、默认麦克风、会中显示器共享、发布轨道开关与本地预览；SDK 恢复期间显示中文重连状态并禁用媒体修改。聊天和会议业务入会流程仍待补齐。
+
+## 中文界面与设备使用
+
+打开“设备与屏幕共享”，点击“刷新设备列表”后选择摄像头，按需勾选入会时开启摄像头和默认麦克风。入会后可开启所选摄像头或共享显示器；左侧“我的音视频”可暂时关闭/重新开启轨道，视频还可彻底停止。真实设备采集和系统权限仍需人工验收。麦克风目前使用系统默认设备，不支持界面内切换。
+
+中文字体优先使用系统微软雅黑（Windows）、苹方/宋体（macOS）或 Noto CJK（Linux），也可设置 `AV_UI_FONT`。缺失字体会明确报错。
 
 ## 构建与运行
 
@@ -38,7 +44,7 @@ SDK 公共 API 使用 C++20 `std::jthread` / `std::stop_token`；Xcode 16 自带
 
 如果同级 WebRTC 已有匹配源码、架构及 libc++ ABI 的 CMake Release 产物，可在配置命令中追加 `-DWEBRTC_PREBUILT_DIR="$PWD/../webrtc/out/$preset"`，复用原生库以减少重复编译。此路径还需匹配的 libjpeg（Homebrew 可用 `brew install jpeg-turbo`）；配置会检查每个静态库是否含目标架构。切回源码构建时显式传入 `-DWEBRTC_PREBUILT_DIR=`。不要混用其他 WebRTC 版本或架构的库。
 
-macOS 窗口使用逻辑点，字体按实际 backing scale 生成，以适配 Retina 和跨屏缩放。音频播放使用 WebRTC CoreAudio 后端。当前界面仅发布合成视频和测试音调，不采集摄像头、麦克风或屏幕，因此不请求这些权限；本地网络连接用途在应用 Info.plist 中声明。HTTPS/WSS 使用 Apple 原生 TLS 和系统信任库，避免依赖 Homebrew 的 CA 文件路径；WebRTC 媒体加密仍使用 OpenSSL。
+macOS 窗口使用逻辑点，字体按实际 backing scale 生成，以适配 Retina 和跨屏缩放。音频播放使用 WebRTC CoreAudio 后端。界面提供真实摄像头、麦克风和屏幕入口，仅在用户操作后启用；打包已声明摄像头与麦克风权限用途，新增真实采集路径尚未在 macOS 验收；本地网络连接用途在应用 Info.plist 中声明。HTTPS/WSS 使用 Apple 原生 TLS 和系统信任库，避免依赖 Homebrew 的 CA 文件路径；WebRTC 媒体加密仍使用 OpenSSL。
 
 无窗口验证和程序内截图（不会打开或操作桌面）：
 
@@ -58,8 +64,8 @@ python3 ../livekit-sdk-cpp/tests/sdk_integration.py \
 1. 启动 LiveKit Server，参见[本机服务器说明](../../../../livekit-sdk-cpp/docs/cli.md)。
 2. 在 **Server URL** 中填写服务器的 WebSocket 地址，在 **Room** 中填写房间名，在 **Token** 中粘贴预先签发的参与者 JWT。
 3. 保持 **Play remote audio**（播放远端音频）勾选，以收听其他参与者的声音。通过 **Test video streams** 选择入会时发布的视频路数（0–8，默认 0）；**Publish test tone**（发布测试音调）是独立选项，默认关闭。
-4. 点击 **Join room**（加入房间）。各路远端视频会保持原始宽高比显示，标题显示参与者名称和轨道名称；没有视频、视频静音和等待首帧时分别显示对应占位提示。本机发布的画面发送给其他客户端，不作为本地预览回显。
-5. 连接过程中可点击 **Cancel**（取消），入会后可点击 **Leave**（离会）。关闭窗口会请求停止会话，界面继续响应，直到资源清理完毕。网络或服务器故障会显示错误，可再次点击 **Join room** 手动重新连接。
+4. 点击 **Join room**（加入房间）。各路远端视频会保持原始宽高比显示，标题显示参与者名称和轨道名称；没有视频、视频静音和等待首帧时分别显示对应占位提示。摄像头和屏幕共享同时显示本地预览，普通测试视频默认不回显。
+5. 连接过程中可点击 **Cancel**（取消），入会后可点击 **Leave**（离会）。关闭窗口会请求停止会话，界面继续响应，直到资源清理完毕。稳定会话发生网络故障时显示“正在重连”；恢复失败后显示错误，可重新加入。
 
 Token 仅保留在进程内存中，不保存到文件或写入日志；客户端不提供 API Secret 输入入口。界面偏好和 ImGui 布局也不会持久化。多个实例必须使用不同的参与者身份，否则 LiveKit 会断开先前以相同身份连接的实例。
 
@@ -85,6 +91,12 @@ $lk = '..\livekit-sdk-cpp\out\windows-x64\Release\lk.exe'
 
 ## 架构与公开 API
 
+会议聊天：入会后通过「显示聊天」打开或收起聊天区。消息发送给本房间所有在线参会者，支持 UTF-8 中文、表情和多行文本；每条最多 2000 字符，Enter 换行，Ctrl+Enter 或「发送」提交。窄窗口中聊天区替换画面区，取消「显示聊天」即可返回画面。
+
+消息显示发送者和「发送中 / 已发送 / 发送结果未确认」。已发送表示提交发送成功，不是已读回执；结果未确认的消息可能已经送出，程序不会自动重发。连接恢复期间禁用发送并保留当前记录，离会或重新入会清空记录，只保存当前会话最近 200 条，不提供服务端历史、离线消息或私聊。
+
+聊天使用可靠数据通道主题 `av.conference.chat.v1` 和版本化 JSON（`v`、`id`、`text`）；发送者来自 SDK 提供的参与者身份，不相信消息正文里的身份字段。接收端校验 UTF-8、长度、版本和主题，并对最近 512 个“参与者 + 消息 ID”组合去重。入会令牌需要 `canPublishData` 权限才能发送。
+
 - `Session` 使用当前 SDK 的 `Room::join_with_token`、`RoomCallback`、`local_participant().publish_track()` 和类型化的 `ParticipantInfo` 快照。demo 的会话管理线程等待入会和发布操作返回的 future，SDK 自己管理原生会话工作线程，因此不会阻塞 UI 或媒体回调。
 - `RoomOptions.video_frame_handler` 与其他回调在 SDK 会话线程上串行执行。`VideoFrame` 自行持有已校正旋转方向的 I420 三平面数据、各平面的行步长、画面尺寸、轨道 SID 和微秒时间戳。若需在回调返回后继续使用，应复制该对象。回调抛出异常会终止会话，并由 `run` 或 `wait` 重新抛出。
 - 原生接收端为每条活动轨道最多保留一帧最新画面。只有注册视频回调后，才对实际交付的帧执行格式转换和像素复制。demo 同样只保留每条轨道的最新帧。SDK 公开头文件不暴露 WebRTC、SDL 或 ImGui 类型。
@@ -102,6 +114,14 @@ python ../livekit-sdk-cpp/tests/sdk_integration.py --client out/windows-x64/Rele
 共用的 Python 测试脚本会启动隔离服务器，并检查实际录制的 Y4M 视频和 WAV 音频。demo 集成测试覆盖两个发布者同时发送视频、同一参与者两路初始视频及动态添加第三路的实际解码、单路停止后其他路继续出帧、全部停止后重新发布、音频轨道保留、发布过程中离会、已有成员和后加入成员、类型化轨道映射、静音与恢复、重复入会、立即取消、无效 JWT、房间不匹配、回调异常和服务端移除参与者。
 
 `video_frames` 测试验证平面步长、旋转处理和每轨道最新帧的行为；`demo_render` 通过读回 SDL/ImGui 渲染像素检查颜色与缩放，无需摄像头或物理显示器。
+
+`conference_chat` 检查中文/UTF-8、空白与长度边界、发送者身份、主题隔离、去重、未确认状态及记录上限。聊天功能单独联调，不采集音视频设备：
+
+```powershell
+python apps/conference/desktop/tests/run_chat_integration.py --client out/conference-standalone/Release/livekit_conference_chat_integration.exe --server D:/Downloads/livekit_1.13.10_windows_amd64/livekit-server.exe
+```
+
+该脚本启动隔离的官方服务，并记录客户端/服务端二进制哈希，覆盖双向中文多行消息、房间隔离、离会清理和重复入会；不作为媒体性能或真实设备验收。
 
 如需生成用于界面检查的位图，将环境变量 `SDL_VIDEODRIVER` 设为 `dummy`、`SDL_RENDER_DRIVER` 设为 `software`，然后运行 `livekit_demo_tests.exe <output.bmp>`，将 `<output.bmp>` 替换为输出文件路径。
 

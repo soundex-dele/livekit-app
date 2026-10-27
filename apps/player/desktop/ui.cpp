@@ -1,4 +1,5 @@
 #include "ui.hpp"
+#include <av/locale.hpp>
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -39,6 +40,21 @@ void centered(ImDrawList* draw, ImVec2 center, const char* text, ImU32 color) {
   auto size = ImGui::CalcTextSize(text);
   draw->AddText({center.x - size.x / 2, center.y - size.y / 2}, color, text);
 }
+void subtitle_overlay(ImDrawList* draw, ImVec2 origin, ImVec2 area, const std::string& text, float scale) {
+  if (text.empty()) return;
+  const float wrap = std::max(1.0f, area.x - 64 * scale);
+  const float max_height = std::max(1.0f, area.y - 36 * scale);
+  auto* font = ImGui::GetFont(); float font_size = 25 * scale;
+  auto size = font->CalcTextSizeA(font_size, FLT_MAX, wrap, text.c_str());
+  while (size.y > max_height && font_size > 12 * scale) {
+    font_size -= scale; size = font->CalcTextSizeA(font_size, FLT_MAX, wrap, text.c_str());
+  }
+  const ImVec2 pos{origin.x + (area.x - size.x) / 2, origin.y + std::max(12 * scale, area.y - size.y - 20 * scale)};
+  draw->PushClipRect(origin, {origin.x + area.x, origin.y + area.y}, true);
+  draw->AddRectFilled({pos.x - 10 * scale, pos.y - 5 * scale}, {pos.x + size.x + 10 * scale, pos.y + size.y + 5 * scale}, IM_COL32(0, 0, 0, 205), 5 * scale);
+  draw->AddText(font, font_size, pos, IM_COL32(255, 255, 255, 255), text.c_str(), nullptr, wrap);
+  draw->PopClipRect();
+}
 }
 std::string format_time(int64_t value) {
   const auto seconds = std::max<int64_t>(0, value / 1000000);
@@ -47,25 +63,7 @@ std::string format_time(int64_t value) {
   else std::snprintf(text, sizeof(text), "%02lld:%02lld", seconds / 60, seconds % 60);
   return text;
 }
-void load_font(float scale) {
-  auto& io = ImGui::GetIO();
-#ifdef _WIN32
-  wchar_t directory[MAX_PATH]{};
-  if (GetWindowsDirectoryW(directory, MAX_PATH)) {
-    const auto font = std::filesystem::path(directory) / "Fonts" / "msyh.ttc";
-    if (std::filesystem::exists(font)) {
-      ImFontConfig config; config.OversampleH = config.OversampleV = 1;
-      static ImVector<ImWchar> ranges;
-      ImFontGlyphRangesBuilder builder;
-      builder.AddRanges(io.Fonts->GetGlyphRangesChineseFull());
-      builder.AddText("←→×…"); builder.BuildRanges(&ranges);
-      io.Fonts->AddFontFromFileTTF(font.string().c_str(), 18 * scale, &config, ranges.Data);
-      return;
-    }
-  }
-#endif
-  io.Fonts->AddFontDefault();
-}
+void load_font(float scale) { av::ui::load_chinese_font(18 * scale); }
 void apply_style(float scale) {
   ImGui::GetStyle() = ImGuiStyle{};
   ImGui::StyleColorsDark();
@@ -120,6 +118,28 @@ void View::browse(Session& session, SDL_Window* window) {
   path_popup_ = true;
 #endif
 }
+void View::browse_subtitles(Session& session, SDL_Window* window) {
+  if (session.busy() || session.closing()) return;
+#ifdef _WIN32
+  const bool resume = session.snapshot().state == sdk::PlayerState::playing;
+  session.pause([this, &session, window, resume] {
+    std::array<wchar_t, 32768> path{};
+    SDL_SysWMinfo wm{}; SDL_VERSION(&wm.version); SDL_GetWindowWMInfo(window, &wm);
+    OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = wm.info.win.window;
+    dialog.lpstrTitle = L"打开字幕文件";
+    dialog.lpstrFilter = L"字幕文件（UTF-8）\0*.srt;*.vtt\0所有文件\0*.*\0";
+    dialog.lpstrFile = path.data(); dialog.nMaxFile = static_cast<DWORD>(path.size());
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    if (GetOpenFileNameW(&dialog)) {
+      const auto utf8 = std::filesystem::path(path.data()).u8string();
+      session.load_subtitles(std::string(utf8.begin(), utf8.end()));
+    } else if (CommDlgExtendedError()) session.subtitle_error = "无法打开文件选择窗口，请输入字幕路径或拖放字幕文件。";
+    if (resume) session.toggle_play();
+  });
+#else
+  show_subtitle_settings();
+#endif
+}
 void View::draw(Session& session, SDL_Window* window) {
   scale_ = ImGui::GetFontSize() / 18;
   const float s = scale_;
@@ -131,9 +151,12 @@ void View::draw(Session& session, SDL_Window* window) {
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
   ImGui::AlignTextToFramePadding();
   ImGui::TextColored(accent, "AV"); ImGui::SameLine(0, 10 * s);
-  ImGui::TextUnformatted("PLAYER"); ImGui::SameLine(0, 16 * s);
+  ImGui::TextUnformatted("播放器"); ImGui::SameLine(0, 16 * s);
   ImGui::TextDisabled("本地播放器");
-  ImGui::SameLine(ImGui::GetWindowWidth() - 260 * s);
+  ImGui::SameLine(ImGui::GetWindowWidth() - 355 * s);
+  ImGui::BeginDisabled(!loaded || session.busy() || session.closing());
+  if (ImGui::Button("字幕", {80 * s, 0})) show_subtitle_settings();
+  ImGui::EndDisabled(); ImGui::SameLine();
   ImGui::BeginDisabled(session.busy() || session.closing());
   if (ImGui::Button("打开文件", {125 * s, 0})) browse(session, window);
   ImGui::SameLine();
@@ -164,8 +187,10 @@ void View::draw(Session& session, SDL_Window* window) {
         snapshot.media.has_audio && !snapshot.media.has_video ? "正在播放音频" : "点击播放以显示画面";
     centered(draw, {center.x, center.y + 10 * s}, title, IM_COL32(226, 235, 242, 255));
     centered(draw, {center.x, center.y + 43 * s}, !loaded ? "拖放音视频文件到这里，或点击右上角打开文件" :
-        snapshot.media.has_video ? "已清除旧画面，继续播放后显示新位置" : "让声音成为主角", IM_COL32(121, 141, 159, 255));
+        snapshot.media.has_video ? "正在等待画面；文件末尾可能没有可预览帧" : "让声音成为主角", IM_COL32(121, 141, 159, 255));
   }
+  if (loaded && session.texture() && !session.busy() && !session.closing())
+    subtitle_overlay(draw, origin, size, session.subtitles.text_at(snapshot.position_us), s);
   draw->AddRect(origin, {origin.x + size.x, origin.y + size.y}, IM_COL32(36, 48, 61, 255), 12 * s);
   ImGui::Spacing();
 
@@ -220,11 +245,49 @@ void View::draw(Session& session, SDL_Window* window) {
   if (has_message) {
     ImGui::PushStyleColor(ImGuiCol_Text, session.error().empty() ? ImVec4(.93f, .73f, .4f, 1) : ImVec4(1, .47f, .45f, 1));
     ImGui::BeginChild("##error", {0, 42 * s}, ImGuiChildFlags_None);
-    ImGui::TextWrapped("%s", session.error().empty() ? session.warning().c_str() : session.error().c_str());
+    if (session.error().empty()) ImGui::TextWrapped("%s", session.warning().c_str());
+    else av::ui::error_message(session.error());
     ImGui::EndChild(); ImGui::PopStyleColor();
   }
   ImGui::Spacing();
-  ImGui::TextDisabled("空格 播放/暂停    ← → 跳转    M 静音    F 全屏    Ctrl+O 打开");
+  ImGui::TextDisabled("空格 播放/暂停    ← → 跳转    M 静音    F 全屏    V 字幕    Ctrl+O 打开");
+
+  if (subtitle_popup_) { ImGui::OpenPopup("字幕设置"); subtitle_popup_ = false; }
+  ImGui::SetNextWindowSize({std::min(580 * s, viewport->WorkSize.x - 40 * s), 0}, ImGuiCond_Appearing);
+  bool subtitle_open = true;
+  if (ImGui::BeginPopupModal("字幕设置", &subtitle_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextWrapped("加载 UTF-8 编码的 SRT 或 WebVTT 字幕，也可将字幕文件拖入播放器。");
+    ImGui::BeginDisabled(!loaded || session.busy() || session.closing());
+#ifdef _WIN32
+    if (ImGui::Button("选择字幕文件")) browse_subtitles(session, window);
+#endif
+    ImGui::TextUnformatted("字幕文件路径");
+    ImGui::SetNextItemWidth(-1);
+    const bool enter = ImGui::InputText("##subtitle-path", subtitle_input_.data(), subtitle_input_.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::BeginDisabled(!subtitle_input_[0]);
+    if (ImGui::Button("加载字幕") || (enter && subtitle_input_[0])) session.load_subtitles(subtitle_input_.data());
+    ImGui::EndDisabled(); ImGui::Separator();
+    if (session.subtitles.size()) {
+      ImGui::TextWrapped("当前字幕：%s", filename(session.subtitles.path()).c_str());
+      ImGui::TextDisabled("%zu 条字幕", session.subtitles.size());
+    } else ImGui::TextDisabled("尚未加载字幕");
+    ImGui::BeginDisabled(!session.subtitles.size());
+    ImGui::Checkbox("显示字幕", &session.subtitles.enabled);
+    ImGui::SetNextItemWidth(230 * s);
+    if (ImGui::InputInt("时间偏移（毫秒）", &session.subtitles.delay_ms, 100, 1000))
+      session.subtitles.delay_ms = std::clamp(session.subtitles.delay_ms, -600000, 600000);
+    ImGui::TextWrapped("正值让字幕晚出现，负值让字幕提前。范围：前后 10 分钟。");
+    if (ImGui::Button("重置时间")) session.subtitles.delay_ms = 0;
+    ImGui::SameLine();
+    if (ImGui::Button("移除字幕")) { session.subtitles.clear(); session.subtitle_error.clear(); }
+    ImGui::EndDisabled(); ImGui::EndDisabled();
+    if (!session.subtitle_error.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, .47f, .45f, 1));
+      ImGui::TextWrapped("%s", session.subtitle_error.c_str()); ImGui::PopStyleColor();
+    }
+    if (ImGui::Button("关闭", {100 * s, 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
 
   if (path_popup_) { ImGui::OpenPopup("打开文件路径"); path_popup_ = false; }
   ImGui::SetNextWindowSize({560 * s, 0}, ImGuiCond_Appearing);

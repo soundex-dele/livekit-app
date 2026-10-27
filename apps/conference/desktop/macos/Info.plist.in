@@ -9,7 +9,7 @@
   <key>CFBundleName</key>
   <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
   <key>CFBundleDisplayName</key>
-  <string>LiveKit Conference</string>
+  <string>视频会议</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
@@ -21,6 +21,10 @@
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Connect to conference servers and participants on your local network.</string>
+  <string>连接局域网中的会议服务器和与会者。</string>
+  <key>NSCameraUsageDescription</key>
+  <string>在你开启摄像头后向会议发送视频。</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>在你开启麦克风后向会议发送声音。</string>
 </dict>
 </plist>

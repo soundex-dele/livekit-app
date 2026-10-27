@@ -1,3 +1,4 @@
+import { errorText, statusText } from '../../../../../packages/web/locale';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { api, terminal, type SessionInfo } from '../services/api';
 import '../style.css';
@@ -38,12 +39,12 @@ async function connect(run: Run) {
     if (!active(run)) return;
     run.frames = true; badge.textContent = '正在播放'; placeholder.hidden = true; fullscreen.disabled = false; hint.textContent = '正在接收 Windows 共享画面。';
    });
-   void video.play().catch(e => finish(run,String(e)));
+   void video.play().catch(e => finish(run,errorText(e)));
   });
   await room.connect(conn.media_url,conn.media_token,{autoSubscribe:true});
   if (!active(run)) { await room.disconnect(); return; }
   run.connected = true; run.nextHeartbeat = 0;
- } catch (e) { if(active(run))await finish(run,String(e)); }
+ } catch (e) { if(active(run))await finish(run,errorText(e)); }
 }
 receive.addEventListener('click',async()=>{
  if(current)return;
@@ -56,21 +57,21 @@ receive.addEventListener('click',async()=>{
   while(active(run)){
    const s=await api<SessionInfo>(`sessions/${session.id}`,session.credential);
    if(!active(run))break;
-   if(terminal(s)){await finish(run,s.reason,s.state==='expired'?'投屏码已过期':'已结束');break;}
+   if(terminal(s)){await finish(run,s.reason ? statusText(s.reason) : '',s.state==='expired'?'投屏码已过期':'已结束');break;}
    if(s.state==='waiting')expiry.textContent=`有效期剩余 ${Math.max(0,Math.ceil((Date.parse(s.expires_at)-Date.now())/1000))} 秒`;
    else {
     code.textContent='已配对';expiry.textContent='';
     if(!run.connecting)void connect(run);
     if(Date.now()>=run.nextHeartbeat){
      const beat=await api<SessionInfo>(`sessions/${session.id}/heartbeat`,session.credential,{connected:run.connected});
-     if(terminal(beat)){await finish(run,beat.reason);break;}
+     if(terminal(beat)){await finish(run,beat.reason ? statusText(beat.reason) : '');break;}
      run.nextHeartbeat=Date.now()+3000;
     }
    }
    await new Promise(resolve=>setTimeout(resolve,500));
   }
- } catch(e){if(active(run))await finish(run,String(e));}
+ } catch(e){if(active(run))await finish(run,errorText(e));}
 });
 stop.addEventListener('click',()=>{if(current)void finish(current);});
-fullscreen.addEventListener('click',()=>{void element('viewport').requestFullscreen().catch(e=>error.textContent=String(e));});
+fullscreen.addEventListener('click',()=>{void element('viewport').requestFullscreen().catch(e=>error.textContent='无法进入全屏，请重试。');});
 window.addEventListener('pagehide',()=>{if(current)void finish(current);});

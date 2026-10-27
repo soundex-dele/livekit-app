@@ -24,9 +24,9 @@ add_library(livekit_player_imgui STATIC
   ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
   ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer2.cpp)
 target_include_directories(livekit_player_imgui PUBLIC "${LIVEKIT_PLAYER_SDL_INCLUDE}"
-  ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+  ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends "${CMAKE_CURRENT_SOURCE_DIR}/../../../packages/native/imgui")
 target_link_libraries(livekit_player_imgui PUBLIC "${LIVEKIT_PLAYER_SDL_LIBRARY}")
-add_library(livekit_player_demo STATIC "${CMAKE_CURRENT_SOURCE_DIR}/session.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/ui.cpp")
+add_library(livekit_player_demo STATIC session.cpp ui.cpp subtitles.cpp)
 target_include_directories(livekit_player_demo PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(livekit_player_demo PUBLIC LiveKit::Player livekit_player_imgui)
 if(WIN32)
@@ -47,6 +47,13 @@ function(av_player_runtime target)
 endfunction()
 av_player_runtime(livekit_local_player)
 if(BUILD_TESTING)
+  add_executable(livekit_player_subtitle_tests tests/subtitle_tests.cpp subtitles.cpp)
+  target_include_directories(livekit_player_subtitle_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_compile_features(livekit_player_subtitle_tests PRIVATE cxx_std_20)
+  if(MSVC)
+    target_compile_options(livekit_player_subtitle_tests PRIVATE /utf-8)
+  endif()
+  add_test(NAME local_player_subtitles COMMAND livekit_player_subtitle_tests)
   find_program(LIVEKIT_PLAYER_FFMPEG_EXECUTABLE ffmpeg HINTS "${LIVEKIT_FFMPEG_ROOT}/bin" REQUIRED)
   add_test(NAME player_app_fixtures COMMAND ${CMAKE_COMMAND}
     "-DFFMPEG=${LIVEKIT_PLAYER_FFMPEG_EXECUTABLE}" "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/fixtures"

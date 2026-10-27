@@ -1,5 +1,6 @@
 #pragma once
 #include "livekit/player.hpp"
+#include "subtitles.hpp"
 #include <SDL.h>
 #include <functional>
 
@@ -14,6 +15,9 @@ class Session {
   explicit Session(SDL_Renderer* renderer) : renderer_(renderer) {}
   ~Session();
   void open(const std::string& path);
+  bool load_subtitles(const std::string& path);
+  Subtitles subtitles;
+  std::string subtitle_error;
   void toggle_play();
   void pause(std::function<void()> after = {});
   void seek(int64_t position);

@@ -4,6 +4,7 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 #include <imgui.h>
+#include <av/locale.hpp>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include "features/remote_control/ui.hpp"
@@ -13,7 +14,7 @@ int main(){
   SDL_Window* window=nullptr;SDL_Renderer* renderer=nullptr;HWND hwnd=nullptr;remote_app::EmergencyHotkey hotkey;int result=0;
   try{
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER)!=0)throw std::runtime_error(SDL_GetError());
-    window=SDL_CreateWindow("AV Remote Assistance",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,660,440,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);if(!window)throw std::runtime_error(SDL_GetError());SDL_SetWindowMinimumSize(window,600,420);
+    window=SDL_CreateWindow("远程协助",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,760,560,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);if(!window)throw std::runtime_error(SDL_GetError());SDL_SetWindowMinimumSize(window,640,500);
     SDL_SysWMinfo wm{};SDL_VERSION(&wm.version);if(!SDL_GetWindowWMInfo(window,&wm))throw std::runtime_error(SDL_GetError());hwnd=wm.info.win.window;
     hotkey=remote_app::register_emergency_hotkey([hwnd](unsigned key,unsigned long& error){
       if(RegisterHotKey(hwnd,1,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,key))return true;
@@ -22,7 +23,7 @@ int main(){
     if(!hotkey.available())std::cerr<<"Global stop shortcut unavailable (Windows error "<<hotkey.error<<"). Use the STOP button or close the window.\n";
     SDL_EventState(SDL_SYSWMEVENT,SDL_ENABLE);
     renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);if(!renderer)throw std::runtime_error(SDL_GetError());
-    IMGUI_CHECKVERSION();ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::StyleColorsDark();
+    IMGUI_CHECKVERSION();ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;av::ui::load_chinese_font();ImGui::StyleColorsDark();
     ImGui_ImplSDL2_InitForSDLRenderer(window,renderer);ImGui_ImplSDLRenderer2_Init(renderer);
     {remote_app::Session session;remote_app::View view;view.hotkey=hotkey;bool closing=false;
       for(;;){SDL_Event event;while(SDL_PollEvent(&event)){

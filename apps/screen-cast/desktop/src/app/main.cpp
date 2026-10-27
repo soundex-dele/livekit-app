@@ -1,6 +1,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <imgui.h>
+#include <av/locale.hpp>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_sdlrenderer2.h>
 #include "features/ui.hpp"
@@ -11,10 +12,10 @@ int main(){
  SDL_Window*window=nullptr;SDL_Renderer*renderer=nullptr;SDL_Texture*texture=nullptr;int tw=0,th=0,result=0;
  try{
   if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER)!=0)throw std::runtime_error(SDL_GetError());
-  window=SDL_CreateWindow("AV Screen Cast",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,880,680,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);if(!window)throw std::runtime_error(SDL_GetError());SDL_SetWindowMinimumSize(window,640,500);
+  window=SDL_CreateWindow("局域网传屏",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,880,680,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);if(!window)throw std::runtime_error(SDL_GetError());SDL_SetWindowMinimumSize(window,640,500);
   renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);if(!renderer)throw std::runtime_error(SDL_GetError());
   ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::StyleColorsDark();
-  ImGui::GetIO().Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc",18,nullptr,ImGui::GetIO().Fonts->GetGlyphRangesChineseFull());
+  av::ui::load_chinese_font();
   ImGui_ImplSDL2_InitForSDLRenderer(window,renderer);ImGui_ImplSDLRenderer2_Init(renderer);
   {screen_cast::Session session;screen_cast::View view;view.displays=livekit::sdk::screen_capture_devices();bool closing=false;std::string uiError;std::shared_ptr<const livekit::sdk::VideoFrame> last;
    for(;;){SDL_Event e;while(SDL_PollEvent(&e)){ImGui_ImplSDL2_ProcessEvent(&e);if(e.type==SDL_QUIT||(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_CLOSE)){closing=true;session.stop();}}

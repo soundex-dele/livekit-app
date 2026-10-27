@@ -23,10 +23,10 @@ function start(label,bin,args,env={}){
 const freePort=()=>new Promise((resolve,reject)=>{const s=createServer();s.on('error',reject);s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});
 async function until(check,label,timeout=20000){const end=Date.now()+timeout;while(Date.now()<end){if(await check())return;await new Promise(r=>setTimeout(r,100));}throw Error('Timed out: '+label);}
 const events=async file=>{try{return(await readFile(file,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);}catch{return[];}};
-let browser;
+let browser,metricsUrl;
 try{
  for(const bin of [mediaBin,businessBin,hostBin]){assert(existsSync(bin),'Missing binary: '+bin);evidence.binaries[bin]=createHash('sha256').update(await readFile(bin)).digest('hex');}
- const mediaPort=await freePort(),apiPort=await freePort();const base=`http://127.0.0.1:${apiPort}`;
+ const mediaPort=await freePort(),apiPort=await freePort();const base=`http://127.0.0.1:${apiPort}`;metricsUrl=`http://127.0.0.1:${mediaPort}/metrics`;
  const config=resolve(output,'media.json');await writeFile(config,JSON.stringify({bind:'127.0.0.1',port:mediaPort,keys:{sctest:'isolated-screen-cast-secret-32-chars'},rtc:{port_range_start:51400,port_range_end:51500}}));
  const media=start('media',mediaBin,['--config',config]);
  const business=start('business',businessBin,['-listen',`127.0.0.1:${apiPort}`,'-db',resolve(output,'state.sqlite'),'-screen-cast-web',resolve(root,'livekit-app/apps/screen-cast/web/dist'),'-media-api',`http://127.0.0.1:${mediaPort}`,'-media-url',`ws://127.0.0.1:${mediaPort}`],{LIVEKIT_API_KEY:'sctest',LIVEKIT_API_SECRET:'isolated-screen-cast-secret-32-chars'});
@@ -35,7 +35,7 @@ try{
  browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{}),args:['--autoplay-policy=no-user-gesture-required']});
  async function connect(label,stopAfter){
    const context=await browser.newContext({viewport:{width:1200,height:900}}),page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
-   await page.addInitScript(()=>{window.__pcs=[];const Native=window.RTCPeerConnection;window.RTCPeerConnection=class extends Native{constructor(...args){super(...args);window.__pcs.push(this);}};});
+   await page.addInitScript(()=>{window.__pcs=[];window.__frameTimeline=[];const Native=window.RTCPeerConnection;window.RTCPeerConnection=class extends Native{constructor(...args){super(...args);window.__pcs.push(this);}};setInterval(()=>{const v=document.querySelector('video');if(v)window.__frameTimeline.push({ms:Math.round(performance.now()),frames:v.getVideoPlaybackQuality().totalVideoFrames});},1000);});
    let session;page.on('response',async r=>{if(r.url()===base+'/api/v1/screen-cast/sessions'&&r.status()===201)session=await r.json();});
    await page.goto(base+'/apps/screen-cast/');await page.locator('#receive').click();
    await until(()=>session,label+' session');const code=session.code;
@@ -45,7 +45,7 @@ try{
    await page.waitForFunction(()=>{const v=document.querySelector('video');return v.videoWidth>0&&v.getVideoPlaybackQuality().totalVideoFrames>=80;},{},{timeout:30000});
    }catch(e){
     const diagnostic=await page.evaluate(async()=>({badge:document.querySelector('#badge').textContent,error:document.querySelector('#error').textContent,video:{width:document.querySelector('video').videoWidth,frames:document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames},stats:await Promise.all(window.__pcs.map(async pc=>({state:pc.connectionState,reports:[...(await pc.getStats()).values()]})))}));
-    evidence.scenarios.push({name:label,passed:false,diagnostic});await page.screenshot({path:resolve(output,label+'-failure.png'),fullPage:true});throw e;
+    diagnostic.timeline=await page.evaluate(()=>window.__frameTimeline);evidence.scenarios.push({name:label,passed:false,diagnostic});await page.screenshot({path:resolve(output,label+'-failure.png'),fullPage:true});throw e;
    }
    const frames=await page.locator('video').evaluate(v=>({width:v.videoWidth,height:v.videoHeight,frames:v.getVideoPlaybackQuality().totalVideoFrames}));
    assert.equal(errors.length,0,errors.join('\n'));assert.match(stdout,/PREVIEW 1280x720/);assert.equal(frames.width,1280);assert.equal(frames.height,720);
@@ -72,6 +72,7 @@ try{
  evidence.scenarios.push({name:'business-outage',passed:true,frames:d.frames});assert.equal(restarted.exitCode,null,'media process died');evidence.passed=true;
 }catch(error){evidence.passed=false;evidence.error=String(error);process.exitCode=1;console.error(error);}
 finally{
+ if(metricsUrl)try{const r=await fetch(metricsUrl,{signal:AbortSignal.timeout(3000)});if(r.ok)await writeFile(resolve(output,'media-metrics.txt'),await r.text());}catch{}
  if(browser)await browser.close();for(const child of children.reverse()){if(child.exitCode===null){child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}}
  await writeFile(resolve(output,'evidence.json'),JSON.stringify(evidence,null,2));for(const log of logs)log.end();console.log('Evidence: '+output);
 }
