@@ -6,7 +6,7 @@ file(GET_RUNTIME_DEPENDENCIES
     "${CMAKE_INSTALL_PREFIX}/bin"
     "@VCPKG_INSTALLED_DIR@/@VCPKG_TARGET_TRIPLET@/$<$<CONFIG:Debug>:debug/>bin"
   PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
-  POST_EXCLUDE_REGEXES ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\].*"
+  POST_EXCLUDE_REGEXES ".*[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\].*"
   RESOLVED_DEPENDENCIES_VAR _media_dlls
   UNRESOLVED_DEPENDENCIES_VAR _missing_dlls)
 if(_missing_dlls)
