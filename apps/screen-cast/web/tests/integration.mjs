@@ -11,9 +11,11 @@ import assert from 'node:assert/strict';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../../../..');
 const output=resolve(process.env.SC_RESULTS||resolve(root,'out/screen-cast',new Date().toISOString().replace(/[:.]/g,'-')));
 await mkdir(output,{recursive:true});
-const mediaBin=process.env.SC_MEDIA_SERVER||resolve(root,'livekit-cpp/out/windows-x64/Release/livekit-server.exe');
-const businessBin=process.env.SC_BUSINESS_SERVER||resolve(root,'livekit-server/out/livekit-business-api.exe');
-const hostBin=process.env.SC_HOST_FIXTURE||resolve(root,'livekit-app/out/screen-cast-desktop/Release/screen_cast_fixture.exe');
+const mac=process.platform==='darwin';
+const arch=process.arch==='arm64'?'arm64':'x86_64';
+const mediaBin=process.env.SC_MEDIA_SERVER||resolve(root,mac?`livekit-cpp/out/macos-${arch}/Release/livekit-server`:'livekit-cpp/out/windows-x64/Release/livekit-server.exe');
+const businessBin=process.env.SC_BUSINESS_SERVER||resolve(root,mac?'livekit-server/out/livekit-business-api':'livekit-server/out/livekit-business-api.exe');
+const hostBin=process.env.SC_HOST_FIXTURE||resolve(root,mac?`livekit-app/out/screen-cast-macos-${arch}/Release/screen_cast_fixture`:'livekit-app/out/screen-cast-desktop/Release/screen_cast_fixture.exe');
 const children=[],logs=[],evidence={automated:true,synthetic_media:true,native_input:false,scenarios:[],binaries:{}};
 function start(label,bin,args,env={}){
  const child=spawn(bin,args,{windowsHide:true,env:{...process.env,...env},stdio:['ignore','pipe','pipe']});children.push(child);
@@ -31,7 +33,7 @@ try{
  const media=start('media',mediaBin,['--config',config]);
  const business=start('business',businessBin,['-listen',`127.0.0.1:${apiPort}`,'-db',resolve(output,'state.sqlite'),'-screen-cast-web',resolve(root,'livekit-app/apps/screen-cast/web/dist'),'-media-api',`http://127.0.0.1:${mediaPort}`,'-media-url',`ws://127.0.0.1:${mediaPort}`],{LIVEKIT_API_KEY:'sctest',LIVEKIT_API_SECRET:'isolated-screen-cast-secret-32-chars'});
  for(const url of [base,`http://127.0.0.1:${mediaPort}`])await until(async()=>{try{return(await fetch(url+'/healthz')).ok;}catch{return false;}},'health '+url);
- const executablePath=process.env.SC_CHROME||['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
+ const executablePath=process.env.SC_CHROME||['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
  browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{}),args:['--autoplay-policy=no-user-gesture-required']});
  async function connect(label,stopAfter){
    const context=await browser.newContext({viewport:{width:1200,height:900}}),page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
@@ -61,7 +63,7 @@ try{
  await b.page.waitForFunction(n=>document.querySelector('video').getVideoPlaybackQuality().totalVideoFrames>=n+30,before);
  evidence.scenarios.push({name:'pairing-decoding-preview-stop-isolation',passed:true,frames:[a.frames,b.frames]});
  b.host.kill();await ended(b);evidence.scenarios.push({name:'sender-crash',passed:true});
- const c=await connect('sender-local-stop',24);await until(()=>c.host.exitCode!==null,'local stop');await ended(c);assert.equal(c.host.exitCode,0);evidence.scenarios.push({name:'sender-local-stop',passed:true,frames:c.frames});
+ const c=await connect('sender-local-stop',24);await until(()=>c.host.exitCode!==null,'local stop',40000);await ended(c);assert.equal(c.host.exitCode,0);evidence.scenarios.push({name:'sender-local-stop',passed:true,frames:c.frames});
  const cancelPage=await browser.newPage();let pending;await cancelPage.route('**/api/v1/screen-cast/sessions',async route=>{const response=await route.fetch();pending=await response.json();await new Promise(r=>setTimeout(r,1000));await route.fulfill({response});});
  await cancelPage.goto(base+'/apps/screen-cast/');await cancelPage.locator('#receive').click();await until(()=>pending,'delayed create');await cancelPage.locator('#stop').click();
  await until(async()=>{const r=await fetch(`${base}/api/v1/screen-cast/sessions/${pending.id}`,{headers:{Authorization:'Bearer '+pending.credential}});return (await r.json()).state==='ended';},'cancelled create cleanup');await cancelPage.close();

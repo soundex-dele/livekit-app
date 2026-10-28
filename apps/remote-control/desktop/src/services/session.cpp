@@ -3,12 +3,12 @@
 #include <future>
 #include <stdexcept>
 #include <iostream>
-#include <syncstream>
+
 using namespace std::chrono_literals;
 namespace remote_app {
 Session::Session(bool fixture,std::shared_ptr<sdk::ControlInputSink> sink):fixture_(fixture){
   if(fixture&&!sink)throw std::invalid_argument("Fixture requires recording input sink");
-  control_=std::make_shared<sdk::RemoteControlSession>(sink?sink:sdk::make_windows_control_input());
+  control_=std::make_shared<sdk::RemoteControlSession>(sink?sink:sdk::make_platform_control_input());
 }
 Session::~Session(){stop();if(worker_.joinable())worker_.join();}
 Snapshot Session::snapshot()const{std::lock_guard lock(mutex_);return snapshot_;}
@@ -18,11 +18,11 @@ void Session::start(std::string url){
   stop_=false;action_=0;cancellation_=std::stop_source{};{std::lock_guard lock(mutex_);snapshot_=Snapshot{};snapshot_.state="creating";snapshot_.finished=false;incoming_.clear();}
   worker_=std::thread([this,url=std::move(url)]{run(url);});
 }
-void Session::approve(){action_=1;}
+void Session::approve(){if(fixture_||sdk::control_permissions().ready())action_=1;}
 void Session::reject(){action_=2;}
 void Session::stop(){stop_=true;cancellation_.request_stop();control_->stop("local_stop");std::shared_ptr<sdk::Room> room;{std::lock_guard lock(mutex_);room=room_;}if(room)room->request_stop();}
 void Session::update(const sdk::Json& v,sdk::ControlClock::time_point started){
-  std::lock_guard lock(mutex_);snapshot_.state=v.at("state");snapshot_.name=v.at("controller_name");snapshot_.id=v.at("id");
+  std::lock_guard lock(mutex_);snapshot_.state=v.at("state");snapshot_.name=v.at("controller_name");snapshot_.id=v.at("id");snapshot_.expires=v.value("expires_at","");
   grant_={v.at("grant_id"),v.at("controller_identity"),v.at("epoch"),started+std::chrono::milliseconds(v.at("lease_remaining_ms").get<int64_t>())};
 }
 void Session::run(std::string url){
@@ -36,6 +36,7 @@ void Session::run(std::string url){
       if(action||now>=next){
         std::string route="/api/v1/remote-control/control-grants/"+id;
         const auto state=snapshot().state;
+        if(action==1&&!fixture_&&!sdk::control_permissions().ready())throw std::runtime_error("屏幕或辅助功能权限不足，请检查系统设置");
         if(action)route+=action==1?"/approve":"/reject";else if(state=="approved")route+="/renew";
         auto request_started=sdk::ControlClock::now();v=request(url,route,credential,(action||state=="approved")?&empty:nullptr);update(v,request_started);
         if(stop_)break;
@@ -60,7 +61,7 @@ void Session::media(std::string url,std::string id,std::string credential){
   // input contents, credentials or media tokens. Production does not emit them.
   auto trace=[enabled=fixture_,began=sdk::ControlClock::now()](const char* event,sdk::Json fields=sdk::Json::object()){
     if(!enabled)return;fields["event"]=event;fields["elapsed_ms"]=std::chrono::duration_cast<std::chrono::milliseconds>(sdk::ControlClock::now()-began).count();
-    std::osyncstream(std::cerr)<<fields.dump()<<'\n';
+    static std::mutex trace_mutex;std::lock_guard lock(trace_mutex);std::cerr<<fields.dump()<<'\n';
   };
   try{
     sdk::Json empty=sdk::Json::object();auto connection=request(url,"/api/v1/remote-control/control-grants/"+id+"/connect",credential,&empty);if(stop_)return;
@@ -98,7 +99,7 @@ void Session::media(std::string url,std::string id,std::string credential){
       while(!sends.empty()&&sends.front().wait_for(0ms)==std::future_status::ready){sends.front().get();sends.pop_front();trace("status_sent");}
       if(sends.size()>=8)throw std::runtime_error("Control status send queue stalled");
       if(sdk::ControlClock::now()>=next){
-        if(!fixture_){auto current=sdk::primary_control_layout();current.version=layout.version;if(current!=layout){current.version++;layout=current;control_->set_layout(layout);}}
+        if(!fixture_){if(!sdk::control_permissions().ready())throw std::runtime_error("权限或交互会话已失效");auto current=sdk::primary_control_layout();current.version=layout.version;if(current!=layout){current.version++;layout=current;control_->set_layout(layout);}}
         auto raw=control_->status().dump();sends.push_back(room->local_participant().publish_data({raw.begin(),raw.end()},{true,sdk::remote_control_topic,{grant.controller_identity}}));
         next=sdk::ControlClock::now()+500ms;
       }

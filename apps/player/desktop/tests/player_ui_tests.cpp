@@ -1,125 +1,227 @@
-#define SDL_MAIN_HANDLED
-#include "ui.hpp"
-#include "imgui_impl_sdl2.h"
-#include "imgui_impl_sdlrenderer2.h"
-#include <filesystem>
-#include <iostream>
-#include <fstream>
+#include "window.hpp"
+#include <QtTest>
+#include <QBuffer>
+#include <cstring>
+#include "utoolkit/logging/logger.h"
+#include <QAction>
+#include <QFile>
+#include <QLabel>
+#include <QListView>
+#include <QMimeData>
+#include <QSlider>
+#include <QTemporaryDir>
+#include <QUrl>
+#include <QDropEvent>
+#include <QDragEnterEvent>
+#include <QDir>
 
+using namespace player_demo;
 namespace {
-void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+QString fixture(const QString& name) { return QString(PLAYER_FIXTURES) + "/" + name; }
+struct AudioStats {
+  int opens = 0, resets = 0, pauses = 0, resumes = 0, frames = 0;
+  int pending = 0; bool paused = false, fail = false;
+};
+class FakeOutput final : public AudioOutput {
+ public:
+  explicit FakeOutput(std::shared_ptr<AudioStats> stats = std::make_shared<AudioStats>()) : stats(std::move(stats)) {}
+  void open() override { ++stats->opens; stats->pending = 0; stats->paused = false; }
+  bool canAccept() const override { return stats->fail || (!stats->paused && stats->pending < 6000); }
+  void enqueue(const sdk::media::AudioFrame& frame) override { ++stats->frames; if (!stats->fail) stats->pending += frame.pcm->size(); }
+  void pump() override { if (stats->fail) stats->pending = 0; else if (!stats->paused) stats->pending = std::max(0, stats->pending - 960); }
+  void suspend(bool value) override { stats->paused = value; if (value) ++stats->pauses; else ++stats->resumes; }
+  void reset() override { ++stats->resets; stats->pending = 0; stats->paused = false; }
+  void setVolume(float) override {}
+  bool drained() const override { return stats->pending == 0; }
+  QString warning() const override { return stats->fail ? QStringLiteral("音频写入失败，将静音播放") : QString{}; }
+  std::shared_ptr<AudioStats> stats;
+};
+QAction* action(PlayerWindow& window, const char* name) { return window.findChild<QAction*>(name); }
 }
-int main(int argc, char** argv) {
-  try {
-    require(argc == 2, "fixture directory required");
-    SDL_SetMainReady(); require(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) == 0, "SDL init");
-    auto* window = SDL_CreateWindow("Player UI test", 0, 0, 1080, 740, SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
-    require(window != nullptr, "window");
-    auto* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    require(renderer != nullptr, "renderer");
-    ImGui::CreateContext(); ImGui::GetIO().IniFilename = nullptr;
-    player_demo::load_font(1); player_demo::apply_style(1);
-    ImGui_ImplSDL2_InitForSDLRenderer(window, renderer); ImGui_ImplSDLRenderer2_Init(renderer);
-    {
-      player_demo::Session session(renderer); player_demo::View view;
-      auto render = [&] {
-        session.update();
-        ImGui_ImplSDLRenderer2_NewFrame(); ImGui_ImplSDL2_NewFrame(); ImGui::NewFrame();
-        view.draw(session, window); ImGui::Render();
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); SDL_RenderClear(renderer);
-        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
-      };
-      auto wait = [&](auto condition) {
-        const auto limit = SDL_GetTicks64() + 5000;
-        while (!condition() && SDL_GetTicks64() < limit) { render(); SDL_Delay(2); }
-        require(condition(), "UI operation timed out");
-      };
-      const std::filesystem::path fixtures = argv[1];
-      auto file = [&](const char* name) { auto value = (fixtures / name).u8string(); return std::string(value.begin(), value.end()); };
-      render(); render(); // empty state, without a command-line media file
-      session.open(file("av.mp4"));
-      wait([&] { return !session.busy() && session.texture(); });
-      require(session.snapshot().state == player_demo::sdk::PlayerState::playing, "open did not autoplay");
-      require(session.video_width() == 160 && session.video_height() == 90, "texture dimensions");
-      std::vector<uint32_t> pixels(1080 * 740);
-      render();
-      require(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, pixels.data(), 1080 * 4) == 0, "readback");
-      int colorful = 0;
-      for (int y = 100; y < 490; ++y) for (int x = 30; x < 1050; ++x) {
-        const auto p = pixels[y * 1080 + x];
-        if (((p >> 16) & 255) > 180 && ((p >> 8) & 255) < 100) ++colorful;
+class PlayerTests : public QObject {
+  Q_OBJECT
+ private slots:
+  void initTestCase() {
+    utoolkit::logging::Logger::GetInstance().Initialize("player-test", "[%l] %v", utoolkit::logging::LogLevel::Warn);
+  }
+  void pcmPartialWrites() {
+    class ShortWriter : public QIODevice {
+     public:
+      QByteArray bytes; bool fail = false;
+      ShortWriter() { open(QIODevice::WriteOnly); }
+      qint64 readData(char*, qint64) override { return -1; }
+      qint64 writeData(const char* data, qint64 count) override {
+        if (fail) return -1;
+        count = std::min<qint64>(3, count); bytes.append(data, count); return count;
       }
-      require(colorful > 5000, "video texture was not rendered inside ImGui");
-      bool paused = false;
-      session.pause([&] { paused = true; });
-      wait([&] { return !session.busy(); });
-      require(paused && session.snapshot().state == player_demo::sdk::PlayerState::paused, "pause completion callback");
-      const auto position = session.snapshot().position_us;
-      SDL_Delay(35); render();
-      require(session.snapshot().position_us == position && session.texture(), "paused picture or clock changed");
-      session.seek(1200000); wait([&] { return !session.busy() && session.texture(); });
-      require(session.snapshot().state == player_demo::sdk::PlayerState::paused && session.snapshot().position_us == 1200000,
-        "paused target preview changed state or position");
-      SDL_Delay(40); render();
-      require(session.texture() && session.snapshot().position_us == 1200000, "preview did not retain paused target");
-      {
-        const auto subtitle_path = fixtures / "captions.srt";
-        { std::ofstream subtitles(subtitle_path, std::ios::binary);
-          subtitles << "1\n00:00:01,000 --> 00:00:02,000\n中文字幕：播放与暂停同步\nEnglish subtitles stay in sync.\n"; }
-        require(session.load_subtitles(file("captions.srt")), "Subtitle load failed");
-        session.subtitles.enabled = false; render();
-        std::vector<uint32_t> without(1080 * 740), with(1080 * 740);
-        require(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, without.data(), 1080 * 4) == 0, "subtitle baseline");
-        session.subtitles.enabled = true; render();
-        require(SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, with.data(), 1080 * 4) == 0, "subtitle readback");
-        int changed = 0;
-        for (int y = 200; y < 500; ++y) for (int x = 30; x < 1050; ++x)
-          if (with[y * 1080 + x] != without[y * 1080 + x]) ++changed;
-        require(changed > 1000, "Subtitles were not drawn over paused video");
-        auto* image = SDL_CreateRGBSurfaceWithFormatFrom(with.data(), 1080, 740, 32, 1080 * 4, SDL_PIXELFORMAT_ARGB8888);
-        require(image != nullptr, "subtitle screenshot surface");
-        const auto saved = SDL_SaveBMP(image, "player-subtitles.bmp"); SDL_FreeSurface(image);
-        require(saved == 0, "subtitle screenshot save");
-        require(!session.load_subtitles(file("missing.srt")) && !session.subtitle_error.empty() && session.subtitles.size() == 1,
-          "Bad subtitle file interrupted playback or destroyed captions");
-        require(session.snapshot().state == player_demo::sdk::PlayerState::paused && session.texture(), "Subtitle error affected playback");
-        session.subtitles.delay_ms = 500;
-        require(session.subtitles.text_at(session.snapshot().position_us).empty(), "Subtitle delay did not follow current position");
-        session.subtitles.delay_ms = 0;
-        session.seek(500000); wait([&] { return !session.busy() && session.texture(); });
-        require(session.subtitles.text_at(session.snapshot().position_us).empty(), "Seek did not clear inactive cue");
-        session.seek(1200000); wait([&] { return !session.busy() && session.texture(); });
-        require(!session.subtitles.text_at(session.snapshot().position_us).empty(), "Seek did not restore active cue");
-      }
-      session.muted = true; session.volume = .25f;
-      session.toggle_play(); wait([&] { return !session.busy() && session.texture(); });
-      require(session.snapshot().position_us >= 1200000, "seek target not applied");
-      session.stop(); wait([&] { return !session.busy(); });
-      require(!session.texture() && session.snapshot().position_us == 0, "stop failed to clear output");
-      session.open(file("audio.wav")); wait([&] { return !session.busy(); });
-      require(session.subtitles.size() == 0 && session.subtitle_error.empty(), "File switch retained subtitles");
-      require(session.snapshot().media.has_audio && !session.snapshot().media.has_video && !session.texture(), "file switch retained video");
-      wait([&] { return session.drained(); });
-      session.open(file("invalid.mp4")); wait([&] { return !session.busy(); });
-      require(!session.error().empty(), "invalid file had no visible error"); render();
-      // Error recovery and a narrow window must continue to render correctly.
-      SDL_SetWindowSize(window, 800, 520);
-      session.open(file("video.mp4")); wait([&] { return !session.busy() && session.texture(); });
-      require(session.error().empty(), "reopen did not clear the error"); render();
-      session.close(); wait([&] { return session.finished(); });
-      require(!session.texture(), "close retained video");
-    }
-    // Closing while open is still pending must complete without a blocking UI wait.
+    } device;
+    sdk::media::AudioFrame frame; frame.pcm = std::make_shared<const std::vector<float>>(std::vector<float>{-2.f, -.5f, .5f, 2.f});
+    PcmBuffer buffer; QVERIFY(buffer.load(frame, false)); QVERIFY(!buffer.load(frame, false));
+    QCOMPARE(buffer.write(device, 0), 0);
+    while (!buffer.empty()) QVERIFY(buffer.write(device, 7) > 0);
+    QCOMPARE(device.bytes, QByteArray(reinterpret_cast<const char*>(frame.pcm->data()), 16));
+    device.bytes.clear(); QVERIFY(buffer.load(frame, true));
+    while (!buffer.empty()) QVERIFY(buffer.write(device, 5) > 0);
+    QCOMPARE(device.bytes.size(), 8); qint16 values[4]; std::memcpy(values, device.bytes.constData(), 8);
+    QCOMPARE(values[0], -32767); QCOMPARE(values[3], 32767);
+    QVERIFY(buffer.load(frame, false)); device.fail = true; QCOMPARE(buffer.write(device, 9), -1); QVERIFY(!buffer.empty());
+    buffer.clear(); QVERIFY(buffer.empty());
+  }
+  void playlist() {
+    PlaylistModel model; model.append({"/one.mp4", "/two.mp4", "/three.mp4"});
+    const auto id = model.item(1).id; model.setCurrent(id);
+    QCOMPARE(model.nextRow(RepeatMode::Sequential), 2);
+    QCOMPARE(model.nextRow(RepeatMode::One), 1);
+    QVERIFY(model.moveRows({}, 1, 1, {}, 3)); QCOMPARE(model.rowForId(id), 2);
+    QCOMPARE(model.nextRow(RepeatMode::Sequential), -1);
+    QCOMPARE(model.nextRow(RepeatMode::All), 0);
+    QCOMPARE(model.nextRow(RepeatMode::One, true), -1);
+    std::unique_ptr<QMimeData> drag(model.mimeData({model.index(2)}));
+    model.dropMimeData(drag.get(), Qt::MoveAction, 0, 0, {});
+    QCOMPARE(model.rowForId(id), 0); QCOMPARE(model.rowCount(), 3);
+    QSignalSpy dropped(&model, &PlaylistModel::filesDropped);
+    QMimeData external; external.setUrls({QUrl::fromLocalFile("/new.mp4"), QUrl("https://example.org/a.mp4")});
+    QVERIFY(model.dropMimeData(&external, Qt::CopyAction, -1, 0, {})); QCOMPARE(dropped.count(), 1);
+    QCOMPARE(dropped.at(0).at(0).toStringList(), QStringList{"/new.mp4"});
+    QVERIFY(model.removeRows(0, 1)); QVERIFY(model.currentId().isEmpty());
+  }
+  void settings() {
+    QTemporaryDir directory; const auto file = directory.filePath("state.ini");
+    const auto media = directory.filePath(QStringLiteral("中文 视频.mp4"));
+    QFile video(media); QVERIFY(video.open(QIODevice::WriteOnly)); video.write("fake media"); video.close();
+    Settings settings(file); settings.remember(media, 20000000, 90000000, false);
+    QCOMPARE(settings.resumePosition(media), 20000000);
+    settings.set("resumeEnabled", false); QCOMPARE(settings.resumePosition(media), 0);
+    settings.set("resumeEnabled", true); settings.sync();
+    Settings restored(file); QCOMPARE(restored.resumePosition(media), 20000000);
+    settings.remember(media, 85000000, 90000000, false); QCOMPARE(settings.resumePosition(media), 0);
+    settings.remember(media, 20000000, 90000000, true); QCOMPARE(settings.resumePosition(media), 0);
+    settings.remember(media, 20000000, 90000000, false);
+    QVERIFY(video.open(QIODevice::Append)); video.write("changed"); video.close(); QCOMPARE(settings.resumePosition(media), 0);
+    for (int i = 0; i < 105; ++i) settings.remember(directory.filePath(QString::number(i)), 20000000, 90000000, false);
+    QCOMPARE(settings.historySize(), 100); settings.clearHistory(); QCOMPARE(settings.historySize(), 0);
+  }
+  void controls() {
+    auto stats = std::make_shared<AudioStats>();
+    Controller controller(std::make_unique<FakeOutput>(stats));
+    QSignalSpy failed(&controller, &Controller::failed);
+    controller.open(fixture("av.mp4"));
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.busy() && !controller.image().isNull(), 5000);
+    QCOMPARE(controller.snapshot().state, sdk::PlayerState::playing);
+    QTRY_VERIFY(stats->frames > 0);
+    controller.togglePlay(); QTRY_VERIFY(!controller.busy());
+    QCOMPARE(controller.snapshot().state, sdk::PlayerState::paused); QVERIFY(stats->paused);
+    const auto frozen = controller.snapshot().position_us; const int queued = stats->pending;
+    QTest::qWait(80); QCOMPARE(controller.snapshot().position_us, frozen); QCOMPARE(stats->pending, queued);
+    const auto oldImage = controller.image(); const auto oldGeneration = controller.snapshot().generation;
+    controller.seek(300000); controller.seek(600000); controller.seek(1200000);
+    QTRY_VERIFY(controller.snapshot().generation > oldGeneration && !controller.busy() && !controller.image().isNull());
+    QCOMPARE(controller.snapshot().position_us, 1200000); QCOMPARE(controller.snapshot().state, sdk::PlayerState::paused);
+    QVERIFY(!oldImage.isNull()); QVERIFY(stats->resets > 0); QCOMPARE(stats->pending, 0);
+    controller.togglePlay(); QTRY_VERIFY(!controller.busy() && controller.snapshot().state == sdk::PlayerState::playing);
+    QVERIFY(stats->resumes > 0);
+    controller.stop(); QTRY_VERIFY(!controller.busy() && controller.snapshot().state == sdk::PlayerState::ready);
+    QCOMPARE(controller.snapshot().position_us, 0); QVERIFY(controller.image().isNull());
+    controller.open(fixture("audio.wav")); QTRY_VERIFY(!controller.busy() && controller.snapshot().media.has_audio && !controller.snapshot().media.has_video);
+    QVERIFY(controller.image().isNull()); QTRY_VERIFY_WITH_TIMEOUT(controller.drained(), 5000);
+    controller.open(fixture("invalid.mp4")); QTRY_COMPARE(failed.count(), 1); QVERIFY(!controller.error().isEmpty());
+    controller.open(fixture("video.mp4")); QTRY_VERIFY(!controller.busy() && !controller.image().isNull()); QVERIFY(controller.error().isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(controller.drained(), 5000);
+    controller.togglePlay(); QTRY_VERIFY(!controller.busy() && controller.snapshot().state == sdk::PlayerState::playing);
+    controller.close(); QTRY_VERIFY(controller.finished()); QVERIFY(controller.image().isNull());
+  }
+  void rapidOpenAndClose() {
+    Controller controller(std::make_unique<FakeOutput>());
+    controller.open(fixture("av.mp4")); controller.open(fixture("audio.wav")); controller.open(fixture("video.mp4"));
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.busy() && controller.path() == fixture("video.mp4") && !controller.image().isNull(), 5000);
+    controller.open(fixture("av.mp4")); controller.close(); QTRY_VERIFY_WITH_TIMEOUT(controller.finished(), 5000);
+  }
+  void outputFailure() {
+    auto stats = std::make_shared<AudioStats>(); Controller controller(std::make_unique<FakeOutput>(stats));
+    controller.open(fixture("av.mp4")); QTRY_VERIFY(stats->frames > 0);
+    stats->fail = true;
+    QTRY_VERIFY_WITH_TIMEOUT(controller.drained(), 6000);
+    QVERIFY(!controller.warning().isEmpty()); QVERIFY(controller.error().isEmpty());
+    controller.close(); QTRY_VERIFY(controller.finished());
+  }
+  void subtitle() {
+    QTemporaryDir directory; Controller controller(std::make_unique<FakeOutput>());
+    controller.open(fixture("av.mp4")); QTRY_VERIFY(!controller.busy() && !controller.image().isNull());
+    const auto path = directory.filePath(QStringLiteral("中文.srt")); QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("1\n00:00:00,000 --> 00:00:02,000\n你好，Qt6\n第二行\n"); file.close();
+    QVERIFY(controller.loadSubtitles(path)); const auto text = controller.subtitles.text_at(1000000); QVERIFY(!text.empty());
+    QVERIFY(!controller.loadSubtitles(directory.filePath("missing.srt"))); QCOMPARE(controller.subtitles.text_at(1000000), text);
+    controller.subtitles.delay_ms = 1000; QVERIFY(controller.subtitles.text_at(500000).empty());
+    controller.open(fixture("audio.wav")); QVERIFY(controller.subtitles.size() == 0);
+    controller.close(); QTRY_VERIFY(controller.finished());
+  }
+  void windowPlayback() {
+    QTemporaryDir directory;
+    PlayerWindow window(directory.filePath("settings.ini"), true, std::make_unique<FakeOutput>());
+    window.show();
+    window.openFiles({fixture("video.mp4"), fixture("audio.wav")});
+    QTRY_VERIFY_WITH_TIMEOUT(window.playlist().rowForId(window.playlist().currentId()) == 1, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.controller().drained(), 5000);
+    window.setAutoAdvance(false); window.openFiles({fixture("av.mp4")});
+    QTRY_VERIFY(!window.controller().busy() && !window.controller().image().isNull());
+    action(window, "play")->trigger(); QTRY_VERIFY(!window.controller().busy() && window.controller().snapshot().state == sdk::PlayerState::paused);
+    QTest::keyClick(&window, Qt::Key_M); QVERIFY(action(window, "mute")->isChecked());
+    const auto before = window.size(); QTest::keyClick(&window, Qt::Key_Escape); QVERIFY(window.isVisible()); QCOMPARE(window.size(), before);
+    QDir().mkpath(PLAYER_SCREENSHOTS); QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/video.png"));
+    window.controller().subtitles = Subtitles::parse("1\n00:00:00,000 --> 00:00:10,000\nQt6 字幕渲染测试\n第二行字幕\n");
+    QTest::qWait(30); QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/subtitles.png"));
+    window.openFiles({fixture("invalid.mp4")}); QTRY_VERIFY(!window.controller().error().isEmpty());
+    QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/error.png"));
+    window.close(); QTRY_VERIFY(window.controller().finished());
+  }
+  void failedPlaylist() {
+    QTemporaryDir directory; PlayerWindow window(directory.filePath("settings.ini"), true, std::make_unique<FakeOutput>());
+    action(window, "repeat2")->trigger();
+    window.openFiles({fixture("invalid.mp4"), fixture("missing.mp4")});
+    QSignalSpy failed(&window.controller(), &Controller::failed);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 2, 5000); QTest::qWait(120); QCOMPARE(failed.count(), 2);
+    QVERIFY(!window.controller().busy());
+    window.openFiles({fixture("invalid.mp4"), fixture("video.mp4")});
+    QTRY_VERIFY(!window.controller().image().isNull());
+    window.close(); QTRY_VERIFY(window.controller().finished());
+  }
+  void dragDropAndPersistence() {
+    QTemporaryDir directory; const auto path = directory.filePath("settings.ini");
     {
-      player_demo::Session session(renderer);
-      session.open((std::filesystem::path(argv[1]) / "av.mp4").string()); session.close();
-      const auto limit = SDL_GetTicks64() + 5000;
-      while (!session.finished() && SDL_GetTicks64() < limit) { session.update(); SDL_Delay(2); }
-      require(session.finished(), "close during open timed out");
+      PlayerWindow window(path, false, std::make_unique<FakeOutput>()); window.setAutoAdvance(false); window.show();
+      auto* video = window.findChild<VideoWidget*>("video"); QMimeData mime; mime.setUrls({QUrl::fromLocalFile(fixture("av.mp4"))});
+      QDragEnterEvent enter(QPoint(50, 50), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier); QApplication::sendEvent(video, &enter); QVERIFY(enter.isAccepted());
+      QDropEvent drop(QPointF(50, 50), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier); QApplication::sendEvent(video, &drop);
+      QTRY_VERIFY(!window.controller().image().isNull());
+      window.openFiles({fixture("audio.wav")}, true); QCOMPARE(window.playlist().rowCount(), 2);
+      window.findChild<QSlider*>("volume")->setValue(37); action(window, "playlist")->setChecked(false); action(window, "repeat1")->trigger();
+      window.close(); QTRY_VERIFY(window.controller().finished());
     }
-    ImGui_ImplSDLRenderer2_Shutdown(); ImGui_ImplSDL2_Shutdown(); ImGui::DestroyContext();
-    SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
-    std::cout << "PASS: ImGui video rendering, async controls, seek, file switching, error recovery, closing\n";
-    return 0;
-  } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
-}
+    PlayerWindow restored(path, false, std::make_unique<FakeOutput>());
+    QCOMPARE(restored.playlist().rowCount(), 2); QCOMPARE(restored.controller().snapshot().state, sdk::PlayerState::closed);
+    QCOMPARE(restored.findChild<QSlider*>("volume")->value(), 37); QVERIFY(!action(restored, "playlist")->isChecked()); QVERIFY(action(restored, "repeat1")->isChecked());
+    restored.close(); QTRY_VERIFY(restored.controller().finished());
+  }
+  void layout() {
+    QTemporaryDir directory; PlayerWindow window(directory.filePath("settings.ini"), true, std::make_unique<FakeOutput>());
+    window.show(); QTest::qWait(30); QDir().mkpath(PLAYER_SCREENSHOTS);
+    auto* video = window.findChild<VideoWidget*>("video");
+    const QString suffix = qEnvironmentVariable("QT_SCALE_FACTOR") == "2" ? "-2x" : "";
+    QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/empty" + suffix + ".png"));
+    window.resize(720, 480); QTest::qWait(30);
+    QVERIFY(video->width() >= 200); QVERIFY(video->height() >= 180);
+    auto* controls = window.findChild<QWidget*>("controls");
+    for (auto* slider : controls->findChildren<QSlider*>()) {
+      QVERIFY(slider->width() > 20); QVERIFY(controls->rect().contains(slider->mapTo(controls, slider->rect().bottomRight())));
+    }
+    QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/compact" + suffix + ".png"));
+    action(window, "playlist")->trigger(); QVERIFY(window.findChild<QWidget*>("listPanel")->isHidden());
+    QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/no-list" + suffix + ".png"));
+    window.toggleFullscreen(); QVERIFY(window.isFullScreen());
+    video->setFocus(); QTest::qWait(3300); QVERIFY(controls->isHidden());
+    QTest::keyClick(&window, Qt::Key_Escape); QVERIFY(!window.isFullScreen()); QVERIFY(!controls->isHidden());
+    window.close(); QTRY_VERIFY(window.controller().finished());
+  }
+};
+QTEST_MAIN(PlayerTests)
+#include "player_ui_tests.moc"

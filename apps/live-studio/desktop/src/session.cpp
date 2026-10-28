@@ -1,13 +1,12 @@
 #include "session.hpp"
 #include <av/http.hpp>
-#include <windows.h>
-#include <wincrypt.h>
+#include "platform.hpp"
 #include <fstream>
 #include <algorithm>
 namespace studio_app {
 namespace {const std::string prefix="/api/v1/live-studio/";}
 Session::Session(std::filesystem::path settings,sdk::StudioOptions options):settings_(std::move(settings)),engine_(std::make_shared<sdk::Studio>(options)){
- try{if(std::filesystem::exists(settings_)){std::ifstream f(settings_,std::ios::binary);std::vector<char>bytes((std::istreambuf_iterator<char>(f)),{});if(bytes.size()>16384)throw std::runtime_error("账号配置过大");DATA_BLOB in{DWORD(bytes.size()),reinterpret_cast<BYTE*>(bytes.data())},out{};if(CryptUnprotectData(&in,nullptr,nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out)){try{auto j=Json::parse(out.pbData,out.pbData+out.cbData);url_=j.at("url");token_=j.at("token");}catch(...){LocalFree(out.pbData);throw;}LocalFree(out.pbData);}}}catch(const std::exception&e){state_.error=e.what();}
+ try{auto account=platform::load_account(settings_);if(!account.is_null()){url_=account.at("url");token_=account.at("token");}}catch(const std::exception&e){state_.error=e.what();}
  state_.server_url=url_;
  worker_=std::jthread([this]{run();});
  media_worker_=std::jthread([this]{while(!closing_){
@@ -26,7 +25,7 @@ std::shared_ptr<sdk::Studio>Session::engine()const{std::lock_guard lock(mutex_);
 Snapshot Session::snapshot()const{std::lock_guard lock(mutex_);return state_;}
 void Session::enqueue(std::function<void()>f){std::lock_guard lock(mutex_);if(commands_.size()<32)commands_.push_back(std::move(f));else state_.error="操作队列已满，请稍后重试";}
 Json Session::request(const std::string&path,const Json*body){return av::request(url_,path,token_,body);}
-void Session::store_token(){std::filesystem::create_directories(settings_.parent_path());auto text=Json{{"url",url_},{"token",token_}}.dump();DATA_BLOB in{DWORD(text.size()),reinterpret_cast<BYTE*>(text.data())},out{};if(!CryptProtectData(&in,L"AV Live Studio",nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out))throw std::runtime_error("无法加密账号凭证");std::ofstream f(settings_,std::ios::binary|std::ios::trunc);f.write(reinterpret_cast<char*>(out.pbData),out.cbData);LocalFree(out.pbData);if(!f)throw std::runtime_error("无法保存账号凭证");}
+void Session::store_token(){platform::save_account(settings_,Json{{"url",url_},{"token",token_}});}
 void Session::login(std::string url,std::string name,std::string password,bool registration){enqueue([this,url=std::move(url),name=std::move(name),password=std::move(password),registration]()mutable{if(!broadcast_.empty())throw std::runtime_error("请先结束直播");if(!url.starts_with("https://")&&!url.starts_with("http://127.0.0.1:")&&!url.starts_with("http://localhost:"))throw std::runtime_error("公网服务请使用 HTTPS");while(url.ends_with('/'))url.pop_back();url_=url;token_.clear();Json body{{"name",name},{"password",password}};auto result=request(std::string("/api/v1/auth/")+(registration?"register":"login"),&body);std::fill(password.begin(),password.end(),'\0');token_=result.at("session_token");store_token();{std::lock_guard lock(mutex_);state_.server_url=url_;state_.user=result.at("user");state_.error.clear();}refresh_rooms();});}
 void Session::logout(){enqueue([this]{disconnect();Json empty=Json::object();request("/api/v1/auth/logout",&empty);token_.clear();store_token();std::lock_guard lock(mutex_);state_.user=nullptr;});}
 void Session::change_password(std::string old,std::string password){enqueue([this,old=std::move(old),password=std::move(password)]{Json body{{"old_password",old},{"password",password}};request("/api/v1/auth/password",&body);disconnect();token_.clear();store_token();std::lock_guard lock(mutex_);state_.user=nullptr;state_.state="密码已更新，请重新登录";});}

@@ -67,6 +67,49 @@
       "cacheVariables": {
         "CMAKE_OSX_ARCHITECTURES": "arm64"
       }
+    },
+    {
+      "name": "conference-qt-macos-x86_64",
+      "inherits": "macos-x86_64",
+      "binaryDir": "${sourceDir}/out/conference-qt-macos-x86_64",
+      "cacheVariables": {
+        "AV_BUILD_REMOTE_CONTROL_DESKTOP": "OFF",
+        "AV_BUILD_SCREEN_CAST_DESKTOP": "OFF",
+        "AV_BUILD_PLAYER_DESKTOP": "OFF",
+        "AV_BUILD_LIVE_STUDIO_DESKTOP": "OFF",
+        "AV_BUILD_CONFERENCE_DESKTOP": "ON",
+        "LIVEKIT_ENABLE_VIDEO_PLAYOUT": "OFF"
+      }
+    },
+    {
+      "name": "conference-qt-macos-arm64",
+      "inherits": "macos-arm64",
+      "binaryDir": "${sourceDir}/out/conference-qt-macos-arm64",
+      "cacheVariables": {
+        "AV_BUILD_REMOTE_CONTROL_DESKTOP": "OFF",
+        "AV_BUILD_SCREEN_CAST_DESKTOP": "OFF",
+        "AV_BUILD_PLAYER_DESKTOP": "OFF",
+        "AV_BUILD_LIVE_STUDIO_DESKTOP": "OFF",
+        "AV_BUILD_CONFERENCE_DESKTOP": "ON",
+        "LIVEKIT_ENABLE_VIDEO_PLAYOUT": "OFF"
+      }
+    },
+    {
+      "name": "conference-qt-windows",
+      "inherits": "windows-x64",
+      "binaryDir": "${sourceDir}/out/conference-qt-windows",
+      "cacheVariables": {
+        "AV_BUILD_REMOTE_CONTROL_DESKTOP": "OFF",
+        "AV_BUILD_SCREEN_CAST_DESKTOP": "OFF",
+        "AV_BUILD_PLAYER_DESKTOP": "OFF",
+        "AV_BUILD_LIVE_STUDIO_DESKTOP": "OFF",
+        "AV_BUILD_CONFERENCE_DESKTOP": "ON",
+        "LIVEKIT_ENABLE_VIDEO_PLAYOUT": "OFF",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "OPENSSL_USE_STATIC_LIBS": "OFF",
+        "OPENSSL_MSVC_STATIC_RT": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -90,6 +133,22 @@
       "name": "macos-arm64",
       "configurePreset": "macos-arm64",
       "jobs": 4
+    },
+    {
+      "name": "conference-qt-macos-x86_64",
+      "configurePreset": "conference-qt-macos-x86_64",
+      "jobs": 4
+    },
+    {
+      "name": "conference-qt-macos-arm64",
+      "configurePreset": "conference-qt-macos-arm64",
+      "jobs": 4
+    },
+    {
+      "name": "conference-qt-windows",
+      "configurePreset": "conference-qt-windows",
+      "configuration": "Release",
+      "jobs": 3
     }
   ],
   "testPresets": [
@@ -120,6 +179,37 @@
       "configurePreset": "macos-arm64",
       "output": {
         "outputOnFailure": true
+      }
+    },
+    {
+      "name": "conference-qt-macos-x86_64",
+      "configurePreset": "conference-qt-macos-x86_64",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen"
+      }
+    },
+    {
+      "name": "conference-qt-macos-arm64",
+      "configurePreset": "conference-qt-macos-arm64",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen"
+      }
+    },
+    {
+      "name": "conference-qt-windows",
+      "configurePreset": "conference-qt-windows",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen"
       }
     }
   ]

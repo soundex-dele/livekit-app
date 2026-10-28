@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+  <key>CFBundleIdentifier</key>
+  <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+  <key>CFBundleName</key>
+  <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+  <key>CFBundleDisplayName</key>
+  <string>直播助手</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleVersion</key>
+  <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>连接局域网中的直播服务器和观看者。</string>
+  <key>NSCameraUsageDescription</key>
+  <string>在你开启摄像头后向直播发送视频。</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>在你开启麦克风后向会议发送声音。</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>在你开启系统声音后，将其他应用的声音加入直播或录制。</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>在你添加屏幕或窗口素材、开启系统声音时采集直播内容。</string>
+</dict>
+</plist>

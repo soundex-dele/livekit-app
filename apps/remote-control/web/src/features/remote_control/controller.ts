@@ -98,7 +98,7 @@ async function watch(gen:number){
 }
 form.addEventListener('submit',event=>{event.preventDefault();if(button.disabled)return;button.disabled=true;const gen=++generation;
   void(async()=>{try{const value=await api('pairings/redeem',{code:el<HTMLInputElement>('code').value.trim(),name:el<HTMLInputElement>('name').value.trim()},'');
-    if(gen!==generation)return;grant=value;credential=value.credential;stop.disabled=false;status('等待 Windows 端确认。对方同意前不会共享画面。');el('badge').textContent='等待确认';void watch(gen);
+    if(gen!==generation)return;grant=value;credential=value.credential;stop.disabled=false;status('等待被控端确认。对方同意前不会共享画面。');el('badge').textContent='等待确认';void watch(gen);
   }catch(e){button.disabled=false;status('申请失败：'+errorText(e));}})();
 });
 stop.onclick=()=>void end('你已停止连接。');

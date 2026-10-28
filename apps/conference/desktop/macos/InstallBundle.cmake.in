@@ -1,7 +1,16 @@
 include(BundleUtilities)
 set(_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/livekit_conference_demo.app")
-fixup_bundle("${_app}" ""
-  "@LIVEKIT_LLVM_ROOT@/lib/c++;@LIVEKIT_LLVM_ROOT@/lib/unwind")
+# macdeployqt normally keeps only Cocoa. Include offscreen for reproducible
+# package startup checks without opening the user's desktop.
+set(_extra_plugins)
+if(EXISTS "@AV_MEETING_OFFSCREEN_PLUGIN@")
+  file(INSTALL "@AV_MEETING_OFFSCREEN_PLUGIN@"
+    DESTINATION "${_app}/Contents/PlugIns/platforms" TYPE SHARED_LIBRARY)
+  get_filename_component(_offscreen_name "@AV_MEETING_OFFSCREEN_PLUGIN@" NAME)
+  list(APPEND _extra_plugins "${_app}/Contents/PlugIns/platforms/${_offscreen_name}")
+endif()
+fixup_bundle("${_app}" "${_extra_plugins}"
+  "${_app}/Contents/Frameworks;@AV_MEETING_QT_EXTRA_LIBRARY_DIR@;@LIVEKIT_LLVM_ROOT@/lib/c++;@LIVEKIT_LLVM_ROOT@/lib/unwind")
 # install_name_tool invalidates existing signatures, including Homebrew's.
 # Ad-hoc signing makes the local bundle usable on Apple Silicon. Distribution
 # still requires the distributor's Developer ID signing and notarization.

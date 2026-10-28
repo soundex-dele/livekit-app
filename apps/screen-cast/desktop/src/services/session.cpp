@@ -1,5 +1,6 @@
 #include "services/session.hpp"
 #include <av/http.hpp>
+#include "platform/permission.hpp"
 #include <algorithm>
 #include <stdexcept>
 using namespace std::chrono_literals;
@@ -23,8 +24,10 @@ void Session::run(std::string url,std::string code,sdk::ScreenCaptureDevice disp
  const auto setState=[&](std::string state){std::lock_guard lock(mutex_);snapshot_.state=std::move(state);};
  try{
   if(code.size()!=10||!std::all_of(code.begin(),code.end(),[](char c){return c>='0'&&c<='9';}))throw std::runtime_error("Enter a 10-digit cast code");
-  if(!fixture_){auto devices=sdk::screen_capture_devices();if(std::find(devices.begin(),devices.end(),display)==devices.end())throw std::runtime_error("Display changed; refresh and select again");}
+  if(!fixture_&&!stop_){setState("permission");if(!(permission_?permission_():requestScreenPermission()))throw std::runtime_error("Screen recording permission denied");}
+  if(!fixture_&&!stop_){auto devices=sdk::screen_capture_devices();if(std::find(devices.begin(),devices.end(),display)==devices.end())throw std::runtime_error("Display changed; refresh and select again");}
   if(!stop_){
+   setState("connecting");
    sdk::Json body{{"code",code}};auto v=av::request(url,"/api/v1/screen-cast/redeem","",&body);id=v.at("id");key=v.at("credential");
    if(!stop_){
     auto empty=sdk::Json::object();auto conn=av::request(url,"/api/v1/screen-cast/sessions/"+id+"/connect",key,&empty);

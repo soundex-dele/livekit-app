@@ -1,13 +1,15 @@
 param(
     [Parameter(Mandatory = $true)][string]$FFmpegRoot,
+    [Parameter(Mandatory = $true)][string]$QtRoot,
     [string]$BuildDirectory = '',
+    [string]$InstallDirectory = '',
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release'
 )
 $ErrorActionPreference = 'Stop'
 $appRoot = Split-Path $PSScriptRoot -Parent
 $ffmpegPrefix = (Resolve-Path -LiteralPath $FFmpegRoot).Path
 if ((Split-Path $ffmpegPrefix -Leaf) -eq 'bin') { $ffmpegPrefix = Split-Path $ffmpegPrefix -Parent }
-if (-not $BuildDirectory) { $BuildDirectory = Join-Path $appRoot 'out/player-windows-ffmpeg71' }
+if (-not $BuildDirectory) { $BuildDirectory = Join-Path $appRoot 'out/player-windows-qt' }
 $dependencyDirectory = Join-Path $appRoot 'out/player-deps'
 New-Item -ItemType Directory -Force -Path $dependencyDirectory | Out-Null
 
@@ -44,25 +46,27 @@ if (-not (Test-Path -LiteralPath (Join-Path $ffmpegInclude 'libavformat/avformat
 #endif
 '@ | Set-Content -LiteralPath (Join-Path $ffmpegInclude 'libavutil/avconfig.h') -Encoding ascii
 }
-$sdlRoot = $ffmpegPrefix
-if (-not (Test-Path -LiteralPath (Join-Path $sdlRoot 'include/SDL2/SDL.h'))) {
-    $archive = Join-Path $dependencyDirectory 'SDL2-devel-2.30.9-VC.zip'
-    Get-VerifiedArchive 'https://www.libsdl.org/release/SDL2-devel-2.30.9-VC.zip' $archive `
-        '8C91D91E5BCB997D062EC2B553C53832EBF95654D4AA35E8C02A954D4CE752AE'
-    $sdlRoot = Join-Path $dependencyDirectory 'SDL2-2.30.9'
-    if (-not (Test-Path -LiteralPath (Join-Path $sdlRoot 'include/SDL.h'))) {
-        Expand-Archive -LiteralPath $archive -DestinationPath $dependencyDirectory -Force
-    }
+$qtPrefix = (Resolve-Path -LiteralPath $QtRoot).Path
+if (-not (Test-Path -LiteralPath (Join-Path $qtPrefix 'lib/cmake/Qt6/Qt6Config.cmake'))) {
+    throw 'QtRoot must point to a Qt 6.8+ MSVC x64 installation with Widgets, Multimedia, Svg and Test.'
 }
+if (-not $InstallDirectory) { $InstallDirectory = Join-Path $BuildDirectory 'dist' }
 # Clear discovery caches so changing FFmpeg versions cannot silently reuse old
 # headers, import libraries or the fixture generator from another installation.
 & cmake -S (Join-Path $appRoot 'apps/player/desktop') -B $BuildDirectory -G 'Visual Studio 17 2022' -A x64 `
-    -U 'LIVEKIT_FFMPEG_*' -U 'LIVEKIT_PLAYER_SDL_*' -U 'LIVEKIT_PLAYER_FFMPEG_EXECUTABLE' -U 'AV_PLAYER_SDL_DLL' `
+    -U 'LIVEKIT_FFMPEG_*' -U 'LIVEKIT_PLAYER_FFMPEG_EXECUTABLE' -U 'Qt6*' `
     -DBUILD_TESTING=ON `
     "-DLIVEKIT_FFMPEG_ROOT=$ffmpegPrefix" "-DLIVEKIT_FFMPEG_INCLUDE=$ffmpegInclude" `
-    "-DLIVEKIT_PLAYER_SDL_ROOT=$sdlRoot"
+    "-DCMAKE_PREFIX_PATH=$qtPrefix" `
+    '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL'
 if ($LASTEXITCODE -ne 0) { throw 'Player configure failed' }
 & cmake --build $BuildDirectory --config $Configuration --parallel 4
 if ($LASTEXITCODE -ne 0) { throw 'Player build failed' }
 & ctest --test-dir $BuildDirectory -C $Configuration --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw 'Player tests failed' }
+
+& cmake --install $BuildDirectory --config $Configuration --prefix $InstallDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Player deployment failed' }
+$smokeTest = Start-Process -FilePath (Join-Path $InstallDirectory 'bin/livekit_local_player.exe') -ArgumentList @('--hidden', '--frames', '5') -Wait -PassThru
+if ($smokeTest.ExitCode -ne 0) { throw 'Deployed player smoke test failed' }
+Write-Host "Player deployment: $InstallDirectory"

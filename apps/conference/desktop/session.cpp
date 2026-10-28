@@ -75,6 +75,10 @@ Session::Session() : room_([this] {
   };
   return callbacks;
 }()) {}
+bool Session::enable_microphone() {
+ std::lock_guard lock(mutex_);if(data_.state!=State::Connected||data_.changing_video)return false;
+ VideoCommand c;c.microphone=true;video_command_=c;data_.changing_video=true;data_.video_error.clear();return true;
+}
 Session::~Session() { stop(); if (worker_.joinable()) worker_.join(); }
 void Session::start(sdk::RoomOptions options) {
   if (std::count_if(options.media.begin(), options.media.end(), [](const auto& m) { return m.video; }) > max_test_videos)
@@ -145,7 +149,8 @@ void Session::start(sdk::RoomOptions options) {
           std::string video_error;
           if (command) {
             try {
-              if (command->muted.has_value()) {
+              if (command->microphone) { room_.local_participant().publish_microphone().get(); }
+              else if (command->muted.has_value()) {
                 bool found = false;
                 for (const auto& track : room_.local_participant().track_publications())
                   if (track.sid() == command->remove_sid) { track.set_muted(*command->muted).get(); found = true; break; }

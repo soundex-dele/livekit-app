@@ -1,0 +1,42 @@
+include(BundleUtilities)
+set(_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/av_remote_host.app")
+file(GLOB_RECURSE _plugins "${_app}/Contents/PlugIns/*.dylib")
+fixup_bundle("${_app}" "${_plugins}"
+  "${_app}/Contents/Frameworks;@LIVEKIT_LLVM_ROOT@/lib/c++;@LIVEKIT_LLVM_ROOT@/lib/unwind")
+# Dependency deployment targets can exceed the source minimum (for example
+# recent Homebrew FFmpeg builds). Reflect the actual bundled requirement.
+set(_minimum "@CMAKE_OSX_DEPLOYMENT_TARGET@")
+file(GLOB_RECURSE _libraries "${_app}/Contents/*.dylib")
+list(APPEND _libraries "${_app}/Contents/MacOS/av_remote_host")
+foreach(_qt QtCore QtGui QtWidgets QtSvg QtDBus QtNetwork)
+  if(EXISTS "${_app}/Contents/Frameworks/${_qt}.framework/Versions/A/${_qt}")
+    list(APPEND _libraries "${_app}/Contents/Frameworks/${_qt}.framework/Versions/A/${_qt}")
+  endif()
+endforeach()
+foreach(_library IN LISTS _libraries)
+  execute_process(COMMAND /usr/bin/otool -l "${_library}" OUTPUT_VARIABLE _headers RESULT_VARIABLE _result)
+  if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "Cannot inspect deployment target: ${_library}")
+  endif()
+  string(REGEX MATCHALL "minos [0-9.]+" _versions "${_headers}")
+  foreach(_version IN LISTS _versions)
+    string(REPLACE "minos " "" _version "${_version}")
+    if(_version VERSION_GREATER _minimum)
+      set(_minimum "${_version}")
+    endif()
+  endforeach()
+endforeach()
+execute_process(COMMAND /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion ${_minimum}" "${_app}/Contents/Info.plist" RESULT_VARIABLE _result)
+if(NOT _result EQUAL 0)
+  message(FATAL_ERROR "Cannot update bundle minimum macOS version")
+endif()
+message(STATUS "AV Remote bundle requires macOS ${_minimum} or later")
+# install_name_tool invalidates existing signatures, including Homebrew's.
+# Ad-hoc signing makes the local bundle usable on Apple Silicon. Distribution
+# still requires the distributor's Developer ID signing and notarization.
+find_program(_codesign codesign REQUIRED)
+execute_process(COMMAND "${_codesign}" --force --deep --sign - "${_app}"
+  RESULT_VARIABLE _sign_result ERROR_VARIABLE _sign_error)
+if(NOT _sign_result EQUAL 0)
+  message(FATAL_ERROR "Cannot ad-hoc sign remote bundle: ${_sign_error}")
+endif()

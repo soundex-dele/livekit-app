@@ -1,137 +1,75 @@
-#define SDL_MAIN_HANDLED
-#include "ui.hpp"
-#include "imgui_impl_sdl2.h"
-#include "imgui_impl_sdlrenderer2.h"
+#include "window.hpp"
 #include "utoolkit/logging/logger.h"
-#include <algorithm>
-#include <filesystem>
+#include <QApplication>
+#include <QCommandLineParser>
+#include <QTemporaryDir>
+#include <QTimer>
 #include <iostream>
 
 namespace {
-struct Options {
-  std::string path, screenshot;
-  bool auto_exit = false, hidden = false, verbose = false;
-  int frames = 0;
+class SilentOutput final : public player_demo::AudioOutput {
+ public:
+  void open() override {}
+  bool canAccept() const override { return true; }
+  void enqueue(const livekit::sdk::media::AudioFrame&) override {}
+  void pump() override {}
+  void suspend(bool) override {}
+  void reset() override {}
+  void setVolume(float) override {}
+  bool drained() const override { return true; }
+  QString warning() const override { return {}; }
 };
-void check(bool ok) { if (!ok) throw std::runtime_error(SDL_GetError()); }
-void screenshot(SDL_Renderer* renderer, const std::string& filename) {
-  int width, height; check(SDL_GetRendererOutputSize(renderer, &width, &height) == 0);
-  auto* surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888);
-  check(surface != nullptr);
-  const bool read = SDL_RenderReadPixels(renderer, nullptr, surface->format->format, surface->pixels, surface->pitch) == 0;
-  const int saved = read ? SDL_SaveBMP(surface, filename.c_str()) : -1;
-  SDL_FreeSurface(surface); check(read && saved == 0);
 }
-int run(const Options& options) {
-  SDL_Window* window = nullptr; SDL_Renderer* renderer = nullptr;
-  bool platform = false, backend = false;
-  int result = 0;
-  try {
-    SDL_SetMainReady();
-    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-    check(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) == 0);
-    float dpi = 96; if (SDL_GetDisplayDPI(0, &dpi, nullptr, nullptr) != 0) dpi = 96;
-    const float scale = std::clamp(dpi / 96, 1.0f, 2.5f);
-    window = SDL_CreateWindow("本地播放器", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        static_cast<int>(1080 * scale), static_cast<int>(740 * scale), SDL_WINDOW_RESIZABLE |
-        SDL_WINDOW_ALLOW_HIGHDPI | (options.hidden ? SDL_WINDOW_HIDDEN : 0));
-    check(window != nullptr);
-    SDL_SetWindowMinimumSize(window, static_cast<int>(800 * scale), static_cast<int>(520 * scale));
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    check(renderer != nullptr);
-    IMGUI_CHECKVERSION(); ImGui::CreateContext();
-    ImGui::GetIO().IniFilename = nullptr;
-    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    player_demo::load_font(scale); player_demo::apply_style(scale);
-    platform = ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
-    backend = ImGui_ImplSDLRenderer2_Init(renderer);
-    if (!platform || !backend) throw std::runtime_error("Cannot initialize ImGui SDL backends");
-    {
-      player_demo::Session session(renderer); player_demo::View view;
-      if (!options.path.empty()) session.open(options.path);
-      int frame_count = 0;
-      bool captured = false;
-      while (!session.finished()) {
-        const auto started = SDL_GetTicks64();
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-          ImGui_ImplSDL2_ProcessEvent(&event);
-          if (event.type == SDL_QUIT || (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE)) session.close();
-          if (event.type == SDL_DROPFILE) {
-            if (player_demo::Subtitles::accepts(event.drop.file)) {
-              if (!session.load_subtitles(event.drop.file)) view.show_subtitle_settings();
-            } else session.open(event.drop.file);
-            SDL_free(event.drop.file);
-          }
-          if (event.type != SDL_KEYDOWN || event.key.repeat || ImGui::GetIO().WantTextInput ||
-              ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) continue;
-          switch (event.key.keysym.sym) {
-            case SDLK_SPACE: session.toggle_play(); break;
-            case SDLK_LEFT: session.seek(session.snapshot().position_us - 5000000); break;
-            case SDLK_RIGHT: session.seek(session.snapshot().position_us + 5000000); break;
-            case SDLK_s: session.stop(); break;
-            case SDLK_m: session.muted = !session.muted; break;
-            case SDLK_f: view.toggle_fullscreen(window); break;
-            case SDLK_v: if (session.subtitles.size()) session.subtitles.enabled = !session.subtitles.enabled; break;
-            case SDLK_ESCAPE: if (view.fullscreen) view.toggle_fullscreen(window); else session.close(); break;
-            case SDLK_o: if (event.key.keysym.mod & KMOD_CTRL) view.browse(session, window); break;
-          }
-        }
-        session.update();
-        ImGui_ImplSDLRenderer2_NewFrame(); ImGui_ImplSDL2_NewFrame(); ImGui::NewFrame();
-        view.draw(session, window);
-        ImGui::Render(); SDL_SetRenderDrawColor(renderer, 14, 17, 23, 255); SDL_RenderClear(renderer);
-        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
-        ++frame_count;
-        if (!options.screenshot.empty() && !captured && frame_count > 3 &&
-            (options.path.empty() || session.texture() || !session.error().empty() || session.snapshot().media.has_audio)) {
-          screenshot(renderer, options.screenshot); captured = true;
-        }
-        SDL_RenderPresent(renderer);
-        if (options.auto_exit && !session.error().empty()) { result = 1; std::cerr << session.error() << '\n'; session.close(); }
-        if (options.auto_exit && session.drained()) session.close();
-        if (options.frames > 0 && frame_count >= options.frames) session.close();
-        const auto elapsed = SDL_GetTicks64() - started;
-        if (elapsed < 8) SDL_Delay(static_cast<Uint32>(8 - elapsed));
-      }
+int main(int argc, char** argv) {
+  // Headless CLI runs never connect to the user's desktop or sound device.
+  for (int i = 1; i < argc; ++i)
+    if (QByteArray(argv[i]) == "--hidden" && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) qputenv("QT_QPA_PLATFORM", "offscreen");
+  QApplication app(argc, argv);
+  QApplication::setApplicationName("livekit_local_player"); QApplication::setOrganizationName("LiveKit");
+  QApplication::setQuitOnLastWindowClosed(false);
+  QCommandLineParser parser; parser.setApplicationDescription(QStringLiteral("Qt6 本地文件播放器")); parser.addHelpOption();
+  parser.addPositionalArgument("file", QStringLiteral("本地媒体文件"), "[file]");
+  parser.addOptions({{"auto-exit", QStringLiteral("播放结束后退出")}, {"hidden", QStringLiteral("无窗口、无设备输出测试")},
+    {"verbose", QStringLiteral("输出详细媒体诊断")}, {"frames", QStringLiteral("更新循环次数"), "count"},
+    {"screenshot", QStringLiteral("导出程序内部渲染截图"), "path"}});
+  parser.process(app);
+  bool validFrames = true; int frames = parser.isSet("frames") ? parser.value("frames").toInt(&validFrames) : 0;
+  const auto paths = parser.positionalArguments();
+  if (!validFrames || frames < 0 || paths.size() > 1 || (parser.isSet("auto-exit") && paths.isEmpty())) {
+    std::cerr << "参数错误：--auto-exit 需要媒体文件，--frames 必须为非负整数。\n"; return 2;
+  }
+  const bool hidden = parser.isSet("hidden");
+  const bool automation = hidden || parser.isSet("auto-exit") || parser.isSet("frames") || parser.isSet("screenshot");
+  QTemporaryDir temp;
+  if (automation && !temp.isValid()) { std::cerr << "无法创建测试设置目录\n"; return 2; }
+  utoolkit::logging::Logger::GetInstance().Initialize("player", "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v",
+    parser.isSet("verbose") ? utoolkit::logging::LogLevel::Trace : utoolkit::logging::LogLevel::Warn);
+  player_demo::PlayerWindow window(automation ? temp.filePath("settings.ini") : QString{}, automation,
+                                  hidden ? std::make_unique<SilentOutput>() : nullptr);
+  window.setAutoAdvance(!parser.isSet("auto-exit"));
+  int code = 0, ticks = 0; bool captured = false;
+  QObject::connect(&window, &player_demo::PlayerWindow::shutdownComplete, &app, [&] { app.exit(code); });
+  if (parser.isSet("auto-exit")) {
+    QObject::connect(&window.controller(), &player_demo::Controller::ended, &window, [&] { window.close(); });
+    QObject::connect(&window.controller(), &player_demo::Controller::failed, &window, [&](const QString& error) {
+      std::cerr << error.toStdString() << '\n'; code = 1; window.close();
+    });
+  }
+  QObject::connect(&window.controller(), &player_demo::Controller::ticked, &window, [&] {
+    ++ticks;
+    const auto media = window.controller().snapshot().media;
+    const bool ready = paths.isEmpty() || !window.controller().image().isNull() || !window.controller().error().isEmpty() ||
+                       (!window.controller().busy() && media.has_audio && !media.has_video);
+    if (parser.isSet("screenshot") && !captured && ticks > 3 && ready) {
+      captured = window.saveScreenshot(parser.value("screenshot"));
+      if (!captured) { code = 1; std::cerr << "截图写入失败\n"; window.close(); }
     }
-  } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }
-  if (backend) ImGui_ImplSDLRenderer2_Shutdown();
-  if (platform) ImGui_ImplSDL2_Shutdown();
-  if (ImGui::GetCurrentContext()) ImGui::DestroyContext();
-  SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
-  return result;
-}
-int entry(const std::vector<std::string>& args) {
-  try {
-    Options options;
-    for (size_t i = 1; i < args.size(); ++i) {
-      if (args[i] == "--auto-exit") options.auto_exit = true;
-      else if (args[i] == "--hidden") options.hidden = true;
-      else if (args[i] == "--verbose") options.verbose = true;
-      else if (args[i] == "--screenshot" && i + 1 < args.size()) options.screenshot = args[++i];
-      else if (args[i] == "--frames" && i + 1 < args.size()) options.frames = std::stoi(args[++i]);
-      else if (args[i] == "--help") {
-        std::cout << "用法：livekit_local_player [本地文件] [--auto-exit] [--hidden] [--screenshot 截图.bmp] [--frames 帧数] [--verbose]\n"; return 0;
-      } else if (options.path.empty() && !args[i].starts_with("--")) options.path = args[i];
-      else throw std::invalid_argument("未知参数：" + args[i]);
+    if (frames > 0 && ticks >= frames) {
+      if (parser.isSet("screenshot") && !captured) { code = 1; std::cerr << "循环结束前未生成截图\n"; }
+      window.close();
     }
-    if (options.auto_exit && options.path.empty()) throw std::invalid_argument("--auto-exit 需要指定媒体文件");
-    utoolkit::logging::Logger::GetInstance().Initialize(
-        "player", "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%t] %v",
-        options.verbose ? utoolkit::logging::LogLevel::Trace : utoolkit::logging::LogLevel::Warn);
-    return run(options);
-  } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
+  });
+  if (!hidden) window.show();
+  if (!paths.isEmpty()) window.openFiles(paths);
+  return app.exec();
 }
-}
-#ifdef _WIN32
-int wmain(int argc, wchar_t** argv) {
-  std::vector<std::string> args;
-  for (int i = 0; i < argc; ++i) { auto text = std::filesystem::path(argv[i]).u8string(); args.emplace_back(text.begin(), text.end()); }
-  return entry(args);
-}
-#else
-int main(int argc, char** argv) { return entry({argv, argv + argc}); }
-#endif
