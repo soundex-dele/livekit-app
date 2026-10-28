@@ -5,8 +5,8 @@
 #include <algorithm>
 namespace studio_app {
 namespace {const std::string prefix="/api/v1/live-studio/";}
-Session::Session(std::filesystem::path settings,sdk::StudioOptions options):settings_(std::move(settings)),engine_(std::make_shared<sdk::Studio>(options)){
- try{auto account=platform::load_account(settings_);if(!account.is_null()){url_=account.at("url");token_=account.at("token");}}catch(const std::exception&e){state_.error=e.what();}
+Session::Session(std::filesystem::path settings,sdk::StudioOptions options,bool offline):settings_(std::move(settings)),engine_(std::make_shared<sdk::Studio>(options)){
+ try{auto account=offline?Json():platform::load_account(settings_);if(!account.is_null()){url_=account.at("url");token_=account.at("token");}}catch(const std::exception&e){state_.error=e.what();}
  state_.server_url=url_;
  worker_=std::jthread([this]{run();});
  media_worker_=std::jthread([this]{while(!closing_){

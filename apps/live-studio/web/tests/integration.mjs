@@ -23,7 +23,7 @@ function passed(name){report.checks.push(name);console.log('PASS',name);}
 const sdkPath=resolve(here,'../node_modules/livekit-client/dist/livekit-client.umd.js');
 async function publisher(name){
  if(process.env.STUDIO_NATIVE==='1'){
-  const child=launch(resolve(root,'livekit-app/out/live-studio/Release/studio_publisher_fixture.exe'),['--url',base,'--name',name,'--duration',String(Number(process.env.STUDIO_DURATION_SECONDS||180)+300),'--settings',resolve(output,name+'-settings'),'--record',resolve(output,name+'.mp4')],name,{STUDIO_FIXTURE_PASSWORD:password});
+  const child=launch(resolve(root,'livekit-app/out/live-studio-qt6/Release/studio_publisher_fixture.exe'),['--url',base,'--name',name,'--duration',String(Number(process.env.STUDIO_DURATION_SECONDS||180)+300),'--settings',resolve(output,name+'-settings'),'--record',resolve(output,name+'.mp4')],name,{STUDIO_FIXTURE_PASSWORD:password});
   const entry=children.at(-1);
   const ready=await until(()=>{for(const line of entry.log().split('\n')){try{const value=JSON.parse(line);if(value.event==='ready')return value;}catch{}}if(child.exitCode!==null)throw new Error(entry.log());},'native publisher '+name,60000);
   const account=await api('/api/v1/auth/login',{name,password});return {token:account.session_token,account,broadcast:{id:ready.broadcast,room:ready.room},prefix:`/api/v1/live-studio/broadcasts/${ready.broadcast}/`,child};

@@ -1,4 +1,4 @@
-# 直播助手桌面端
+# 直播助手桌面端（Qt 6）
 
 直播场景合成、屏幕/窗口/摄像头素材、图片/文字/本地视频、混音、连麦、PK 和 H.264/AAC 本地录制。直播业务仍需要独立部署业务服务和媒体服务；桌面应用打包不包含这两个服务。
 
@@ -8,7 +8,7 @@
 
 ```sh
 # 依赖须与目标 CPU 架构一致。
-brew install cmake nasm llvm openssl@3 libvpx dav1d jpeg-turbo ffmpeg
+brew install cmake nasm llvm qt openssl@3 libvpx dav1d jpeg-turbo ffmpeg
 ./scripts/build/live-studio-macos.sh
 ```
 
@@ -29,7 +29,7 @@ brew install cmake nasm llvm openssl@3 libvpx dav1d jpeg-turbo ffmpeg
 - CoreGraphics/ImageIO 加载图片，AppKit 绘制中文文字和显示原生文件选择窗口。
 - HTTPS 使用系统信任库，业务 HTTP 请求拒绝重定向，并限制响应大小及超时。
 - 账号 Token 保存到 macOS Keychain；项目保存在 `~/Library/Application Support/AVPlatform/LiveStudio/project.json`。`--settings` 可选择独立项目目录，Keychain 账号也按该目录隔离。
-- Retina 使用逻辑点布局和按 backing scale 栅格化的字体，跨屏缩放时重建字体纹理。
+- Qt 6 Widgets 使用逻辑像素与系统 DPI，跨屏字体和控件缩放由 Qt 管理。
 
 仅在添加设备素材或开启相应声音后启动采集。请在「系统设置 → 隐私与安全性」中授予摄像头、麦克风、屏幕与系统音频录制权限。拒绝权限时界面显示错误，可以授权后刷新或重新启用。不要把自动化离线测试通过理解为真实设备已验收。
 
@@ -38,11 +38,22 @@ brew install cmake nasm llvm openssl@3 libvpx dav1d jpeg-turbo ffmpeg
 ```sh
 build=livekit-app/out/live-studio-macos-x86_64
 ctest --test-dir "$build" --output-on-failure -R '^studio_'
-SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software \
+QT_QPA_PLATFORM=offscreen \
   "$build/Release/av_live_studio.app/Contents/MacOS/av_live_studio" \
   --hidden --frames 60 --settings "$build/offline-project" --screenshot "$build/studio.bmp"
 ```
 
-CTest 使用隔离目录、合成素材和本地 HTTP fixture，不枚举或采集真实摄像头、麦克风、屏幕，也不操作用户桌面。Metal 测试只向离屏缓冲区绘制；没有 Metal 设备时明确跳过。`--hidden --test-density 2` 可模拟 2x backing buffer。
+CTest 使用隔离目录、合成素材和本地 HTTP fixture，不枚举或采集真实摄像头、麦克风、屏幕，也不操作用户桌面。Metal 测试只向离屏缓冲区绘制；没有 Metal 设备时明确跳过。`--hidden --test-density 2` 生成 2x 程序内渲染截图；Qt Test 另可配合 `QT_SCALE_FACTOR=2` 验证控件缩放。
 
-实际设备采集、系统权限弹窗、音频可听、跨屏 Retina、Finder 启动，以及真实服务器的直播/连麦/PK 互通应另外人工验收。Windows 代码路径保留，修改后的 Windows 构建需在 Windows 上回归。
+实际设备采集、系统权限弹窗、音频可听、跨屏 Retina、Finder 启动，以及真实服务器的直播/连麦/PK 互通应另外人工验收。Windows 构建见 [产品说明](../README.md)，使用 Qt 6.8+、动态 CRT 和匹配的 WebRTC。macOS 变更需在 macOS 上另外编译及验收。
+
+
+## 界面结构与离屏测试
+
+- `src/main.cpp`：QApplication、参数检查、offscreen 运行和 QWidget::render 截图。
+- `src/window.cpp`：场景、素材、属性、混音、账号、互动与项目保存。
+- `src/preview.cpp`：QPainter RGBA 预览、旋转素材选择、拖动和方向键编辑。
+- `src/session.cpp`：保留异步业务/媒体会话，离屏运行跳过保存的账号。
+- `tests/widgets_test.cpp`：Qt Test 程序内控件测试，不使用桌面自动化。
+
+隐藏模式必须指定独立配置目录；即使测试目录包含设备源和启用音频的旧项目，运行时也会过滤采集源并关闭音频。持久化项目保留原始内容。正式启动继续按原项目配置恢复采集。

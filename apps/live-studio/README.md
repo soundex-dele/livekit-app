@@ -1,21 +1,21 @@
 # AV 直播伴侣
 
-Windows 11 x64 原生直播工作台和浏览器观看端。桌面使用 C++20、ImGui、SDL2；媒体由 SDK Studio 引擎处理，业务服务管理账号、直播、聊天、连麦、礼物和 PK。直播输出使用自有 C++ SFU 的 VP8/Opus 链路。
+Windows 11 x64 原生直播工作台和浏览器观看端。桌面使用 C++20、Qt 6.8+ Widgets；媒体由 SDK Studio 引擎处理，业务服务管理账号、直播、聊天、连麦、礼物和 PK。直播输出使用自有 C++ SFU 的 VP8/Opus 链路。
 
 ## 构建
 
-构建需要 PowerShell 7、VS2022、Windows SDK 10.0.26100+、CMake 3.24+、Go 1.25+、Node.js 22、vcpkg 静态依赖、匹配的 WebRTC 产物和 FFmpeg 开发包。
+构建需要 PowerShell 7、VS2022、Windows SDK 10.0.26100+、CMake 3.24+、Go 1.25+、Node.js 22、Qt 6.8+ MSVC、vcpkg x64-windows 动态 CRT 依赖、匹配的 /MD WebRTC 产物和 FFmpeg 开发包。
 
 在聚合仓库根运行：
 
 ```powershell
-.\scripts\build\live-studio.ps1 -VcpkgRoot D:\vcpkg `
+.\scripts\build\live-studio.ps1 -VcpkgRoot D:\vcpkg -QtRoot D:\Qt\6.8.3\msvc2022_64 `
   -FFmpegRoot D:\Downloads\ffmpeg-n7.1-241205-gpl-amd64-shared `
   -FFmpegInclude .\livekit-sdk-cpp\out\player-deps\FFmpeg-b08d7969c550a804a59511c7b83f2dd8cc0499b8 `
   -Package
 ```
 
-输出为 `livekit-app/out/live-studio/Release/av_live_studio.exe`。完整客户端根工程选项为 `AV_BUILD_LIVE_STUDIO_DESKTOP=ON`，默认关闭。SDK 选项 `LIVEKIT_BUILD_STUDIO` 需要 RTC、Player 同时启用。
+输出为 `livekit-app/out/live-studio-qt6/Release/av_live_studio.exe`。完整客户端根工程选项为 `AV_BUILD_LIVE_STUDIO_DESKTOP=ON`，默认关闭。SDK 选项 `LIVEKIT_BUILD_STUDIO` 需要 RTC、Player 同时启用。
 
 Studio 使用系统 D3D11、WGC、WASAPI、WIC，文件解码和录制使用 FFmpeg；合成采用 GPU 渲染后读回 I420 供既有 SDK 发布，不是端到端 GPU 零拷贝。硬件设备失败会在工作台显示错误。自动化测试可用 WARP，无需访问桌面采集设备。
 
@@ -33,7 +33,7 @@ clock ──→ sources ──AudioInput──→ mixer ──MixedAudio──�
 
 停止时先停止时钟驱动，再由图节点关闭采集并排空录制；释放时关闭四路输出，并在工作线程退出 COM apartment 前释放 D3D11 资源。节点处理异常会传回 Studio 的错误状态，录制失败独立报告并保留预览与发布。
 
-当前示例 FFmpeg 包为 GPL 构建，分发前应随包提供该版本及其组件的许可证、对应源码或合规源码提供方式；SDL2 为 zlib、ImGui 为 MIT，其余依赖以各源码 LICENSE 为准。打包脚本汇集运行文件与可找到的许可证，当前包用于本地验收；公开分发前还需完成依赖及源码提供方式核对。
+当前示例 FFmpeg 包为 GPL 构建，分发前应随包提供该版本及其组件的许可证、对应源码或合规源码提供方式；Qt 按所使用发行版的 LGPL/GPL 或商业许可分发，其余依赖以各源码 LICENSE 为准。打包脚本汇集运行文件与可找到的许可证，当前包用于本地验收；公开分发前还需完成依赖及源码提供方式核对。
 
 ## 服务与账号
 
@@ -54,7 +54,7 @@ $env:LIVE_STUDIO_ADMISSION_SECRET='<另一段至少 24 字符的随机密钥>'
 
 ## 使用与规则
 
-- 开播后可在互动面板复制固定观看地址。左侧添加素材及场景；选中素材后可在预览拖动，按 Shift 拖动调整尺寸，也可在属性面板填写变换与裁剪值。
+- 开播后可在互动面板复制固定观看地址。左侧添加素材及场景；选中素材后可在预览拖动或使用方向键移动，按 Shift 配合拖动或方向键调整尺寸，也可在属性面板填写变换与裁剪值。
 - 绿幕支持背景色、相似度、平滑和抑制绿色溢色。图片支持 alpha；文字使用系统中文字体。
 - 麦克风、系统声音和连麦监听显式启用；系统声音排除本进程树，连麦媒体不会循环发送。
 - 输出固定 30 fps，可选 720p/1080p 横竖屏。开播或录制期间不能更改画布尺寸。
@@ -66,7 +66,7 @@ $env:LIVE_STUDIO_ADMISSION_SECRET='<另一段至少 24 字符的随机密钥>'
 ## 验证
 
 ```powershell
-ctest --test-dir livekit-app/out/live-studio -C Release --output-on-failure
+ctest --test-dir livekit-app/out/live-studio-qt6 -C Release --output-on-failure
 cd livekit-app/apps/live-studio/web
 npm test
 npm run test:integration
@@ -74,7 +74,7 @@ npm run test:integration
 
 端到端测试启动独立业务与媒体进程、使用 headless Chrome 和合成音视频；输出位于 `livekit-app/out/live-studio/integration-*`，包含报告、日志与浏览器截图。可用 `STUDIO_BROWSER_CHANNEL` 指定已安装浏览器通道。
 
-桌面测试参数为 `--hidden --frames 60 --settings <测试目录> --screenshot <BMP路径>`；不得使用真实账号配置目录进行自动化测试。SDK 测试执行 CPU/WARP 合成、绿幕、混音、项目恢复与 MKV→MP4 录制，不访问用户桌面。
+桌面测试参数为 `--hidden --frames 60 --settings <测试目录> --screenshot <PNG或BMP路径>`；不得使用真实账号配置目录进行自动化测试。SDK 测试执行 CPU/WARP 合成、绿幕、混音、项目恢复与 MKV→MP4 录制，不访问用户桌面。
 
 `studio_graph` 测试使用 WARP、合成色块和 PCM 验证真实图边的数据传递、Local/Program 隔离、场景更新、发布背压、图停止/重启/释放、录制收尾及节点异常传播，不访问真实采集或播放设备。
 
@@ -104,3 +104,14 @@ node tests/integration.mjs
 容量脚本记录实际解码帧率、接收带宽、整机 CPU 和内存，采用本机同时推流、SFU、解码的拓扑。`passed` 只代表报告所列检查；容量测试的 RTP 计数不能证明音画同步。原生报告单独列出 `native_av.target_met`；`functional_pass_timing_failed` 代表功能闭环通过但同步未达标。
 
 `-Package` 输出到 `out/packages/live-studio-<时间>`，包含桌面 EXE/DLL、server 下的 Go 服务、SFU、管理员工具、Web 静态文件及部署脚本。包内先设置前述环境变量，再执行 `start-services.ps1`；管理员工具位于 `server/studio-admin.exe`。脚本只启动后台服务，桌面程序由使用者自行打开。
+
+
+## Qt 6 桌面端
+
+桌面入口、窗口、对话框、预览绘制和事件循环全部使用 Qt 6，保留 SDK Studio / GraphEngine 合成、混音、录制与 Session 业务逻辑。原有 project.json、Windows DPAPI / macOS Keychain 账号存储保持兼容。Qt 原生控件支持中文输入法、键盘导航、剪贴板及屏幕 DPI 缩放。
+
+Windows 构建脚本自动复用 `livekit-app/out/conference-qt-windows` 中带 `/MD` 标记的 WebRTC；也可用 `-QtWebRTCBuild <目录>` 指定其他匹配产物。服务端继续使用 `-WebRTCBuild` 的 `/MT` 产物。两者不能混用。未找到 `/MD` 预编译库时，从源构建。Qt 桌面端关闭 SDK 可选 SDL 播放窗口。首次构建需安装 x64-windows 的 openssl、libvpx、dav1d 等 SDK 依赖。
+
+构建后通过 windeployqt 部署 Qt DLL 与平台插件；打包脚本使用 CMake 的 Qt 部署步骤收集插件。`studio_widgets` 测试通过 Qt Test 检查场景/素材编辑、项目恢复、锁定、键盘操作、画布切换及隐藏模式设备隔离，`studio_ui` / `studio_ui_portrait` / `studio_ui_hidpi` 生成程序内截图。
+
+`--hidden` 自动选择 Qt offscreen 平台，必须显式传入隔离的 `--settings` 目录；此模式不加载账号、不枚举/采集设备、不播放本地视频或启用音频输入，只呈现颜色、文字、图片等离线素材，且不会将过滤结果写回项目。自动化验证不代表真实设备或真实服务器直播、连麦、PK 已完成人工验收。

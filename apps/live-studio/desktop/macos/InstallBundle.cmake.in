@@ -1,6 +1,7 @@
 include(BundleUtilities)
 set(_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/av_live_studio.app")
-fixup_bundle("${_app}" ""
+file(GLOB_RECURSE _plugins "${_app}/Contents/PlugIns/*.dylib")
+fixup_bundle("${_app}" "${_plugins}"
   "@LIVEKIT_LLVM_ROOT@/lib/c++;@LIVEKIT_LLVM_ROOT@/lib/unwind")
 # Dependency deployment targets can exceed the source minimum (for example
 # recent Homebrew FFmpeg builds). Reflect the actual bundled requirement.

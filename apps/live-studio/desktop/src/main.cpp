@@ -1,103 +1,58 @@
-#define SDL_MAIN_HANDLED
-#include "session.hpp"
-#include <SDL.h>
-#include <imgui.h>
-#include <imgui_impl_sdl2.h>
-#include <imgui_impl_sdlrenderer2.h>
-#include <av/locale.hpp>
+#include "window.hpp"
 #include "platform.hpp"
-#include <algorithm>
-#include <chrono>
+#include <QApplication>
+#include <QCommandLineParser>
+#include <QImage>
+#include <QTimer>
 #include <iostream>
-#include <iomanip>
-#include <sstream>
-#include <future>
 
-using namespace studio_app;
-namespace {
-#ifdef _WIN32
-std::string utf8(const std::filesystem::path&p){auto s=p.u8string();return {s.begin(),s.end()};}
-#endif
-std::string id(){return std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());}
-void check(bool v){if(!v)throw std::runtime_error(SDL_GetError());}
-float density(SDL_Window* window,SDL_Renderer* renderer){int w=0,h=0,pw=0,ph=0;SDL_GetWindowSize(window,&w,&h);if(w<1||h<1||SDL_GetRendererOutputSize(renderer,&pw,&ph)!=0)return 1;return std::clamp(std::max(float(pw)/w,float(ph)/h),1.f,3.f);}
-void fonts(float scale,float backing){auto&io=ImGui::GetIO();io.Fonts->Clear();av::ui::load_chinese_font(18*scale*backing);io.FontGlobalScale=1/backing;}
-std::string browse(bool save=false){return platform::browse(save);}
-void theme(){ImGui::StyleColorsDark();auto&s=ImGui::GetStyle();s.WindowRounding=0;s.ChildRounding=9;s.FrameRounding=6;s.PopupRounding=8;s.FramePadding={9,7};s.ItemSpacing={8,8};s.WindowPadding={16,14};auto&c=s.Colors;c[ImGuiCol_WindowBg]={.055f,.065f,.09f,1};c[ImGuiCol_ChildBg]={.085f,.10f,.14f,1};c[ImGuiCol_FrameBg]={.12f,.15f,.20f,1};c[ImGuiCol_Button]={.16f,.20f,.28f,1};c[ImGuiCol_ButtonHovered]={.25f,.30f,.40f,1};c[ImGuiCol_Header]={.22f,.16f,.25f,1};c[ImGuiCol_HeaderHovered]={.32f,.22f,.32f,1};c[ImGuiCol_CheckMark]={1,.35f,.50f,1};c[ImGuiCol_SliderGrab]={.92f,.30f,.44f,1};c[ImGuiCol_Text]={.92f,.94f,.98f,1};c[ImGuiCol_TextDisabled]={.59f,.65f,.75f,1};c[ImGuiCol_Border]={.17f,.20f,.26f,1};}
-bool primary(const char*label,ImVec2 size={}){ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.82f,.19f,.34f,1));ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(.95f,.29f,.44f,1));bool clicked=ImGui::Button(label,size);ImGui::PopStyleColor(2);return clicked;}
-void caption(const char*s){ImGui::TextDisabled("%s",s);}
-void saveShot(SDL_Renderer*r,const std::string&p){int w,h;check(SDL_GetRendererOutputSize(r,&w,&h)==0);auto*s=SDL_CreateRGBSurfaceWithFormat(0,w,h,32,SDL_PIXELFORMAT_RGBA32);check(s!=nullptr);bool read=SDL_RenderReadPixels(r,nullptr,s->format->format,s->pixels,s->pitch)==0;int result=read?SDL_SaveBMP(s,p.c_str()):-1;SDL_FreeSurface(s);check(result==0);}
-struct UI {
- std::vector<sdk::StudioScene> scenes;size_t selected=0;int source=-1;bool dirty=false,registering=false;float scale=1;uint64_t fpsFrames=0,fpsTime=0;double actualFps=0;
- sdk::StudioOptions options;sdk::StudioAudioSettings audio;
- char url[512]="http://127.0.0.1:8080",name[64]{},password[160]{},old_password[160]{},new_password[160]{},title[256]="分享此刻的精彩",message[1024]{},input[2048]{},sceneName[128]{},recordPath[2048]{};
- std::future<std::vector<sdk::StudioDevice>> deviceRequest;int requestKind=0;bool refreshDevices=true;std::string deviceError;
- int addKind=0,deviceIndex=0;std::vector<sdk::StudioDevice>devices;std::string error;std::filesystem::path project;uint64_t lastSave=0;
- sdk::StudioScene&scene(){return scenes[selected];}
- void changed(Session&s){s.set_scene(scene());s.set_audio(audio);dirty=true;}
- void init(Session&s){if(std::filesystem::exists(project)){try{scenes=sdk::Studio::load_project(project,selected,options,audio);}catch(const std::exception&e){error=e.what();}}
-  if(scenes.empty()){sdk::StudioScene main;main.sources.push_back({});main.sources[0].id="background";main.sources[0].name="背景";sdk::StudioSource text;text.id="welcome";text.name="标题";text.kind=sdk::StudioSourceKind::text;text.input="与你一起，分享此刻。";text.color={.95f,.96f,1,1};text.transform={.08f,.39f,.82f,options.width<options.height?.07f:.22f};main.sources.push_back(text);scenes={main};}changed(s);}
- void addDialog(Session&s){if(ImGui::BeginPopupModal("添加素材",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){const char*types[]{"屏幕捕获","窗口捕获","摄像头","图片","文字","本地视频","纯色背景"};if(ImGui::Combo("素材类型",&addKind,types,7)){devices.clear();deviceIndex=0;input[0]=0;refreshDevices=true;deviceError.clear();}
-  if(addKind<3){
-   if(deviceRequest.valid()&&deviceRequest.wait_for(std::chrono::seconds(0))==std::future_status::ready){try{auto found=deviceRequest.get();if(requestKind==addKind){devices=std::move(found);deviceIndex=0;deviceError.clear();}}catch(const std::exception&e){if(requestKind==addKind)deviceError=e.what();}}
-   if(ImGui::Button("刷新设备"))refreshDevices=true;
-   if(refreshDevices&&!deviceRequest.valid()){requestKind=addKind;refreshDevices=false;deviceError.clear();deviceRequest=std::async(std::launch::async,[kind=addKind]{return kind==0?sdk::studio_screens():kind==1?sdk::studio_windows():sdk::studio_cameras();});}
-   if(deviceRequest.valid())ImGui::TextUnformatted("正在获取设备列表，请按系统提示授权…");
-   if(!deviceError.empty())ImGui::TextWrapped("%s",deviceError.c_str());
-   if(ImGui::BeginListBox("设备",{480*scale,160*scale})){for(size_t i=0;i<devices.size();++i)if(ImGui::Selectable(devices[i].name.c_str(),deviceIndex==int(i)))deviceIndex=int(i);ImGui::EndListBox();}
-   if(devices.empty()&&!deviceRequest.valid())ImGui::TextWrapped("未发现可用设备。请检查连接或权限后刷新。");
-  }
-  else if(addKind!=6){ImGui::SetNextItemWidth(480*scale);ImGui::InputText(addKind==4?"文字内容":"文件路径",input,sizeof(input));if(addKind!=4&&ImGui::Button("选择文件…")){auto file=browse();if(!file.empty())snprintf(input,sizeof(input),"%s",file.c_str());}}
-  bool valid=addKind<3?!devices.empty():(addKind==6||input[0]);ImGui::BeginDisabled(!valid);if(primary("添加",{120*scale,0})){sdk::StudioSource item;item.id=id();item.name=types[addKind];item.kind=std::array<sdk::StudioSourceKind,7>{sdk::StudioSourceKind::screen,sdk::StudioSourceKind::window,sdk::StudioSourceKind::camera,sdk::StudioSourceKind::image,sdk::StudioSourceKind::text,sdk::StudioSourceKind::video,sdk::StudioSourceKind::color}[addKind];item.input=addKind<3?devices.at(deviceIndex).id:input;if(addKind==4){item.transform={.08f,.76f,.8f,.18f};item.color={1,1,1,1};}else if(addKind==2)item.transform={.68f,.62f,.28f,.32f};scene().sources.push_back(item);source=int(scene().sources.size())-1;changed(s);ImGui::CloseCurrentPopup();}ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("取消"))ImGui::CloseCurrentPopup();ImGui::EndPopup();}}
- void account(Session&s,const Snapshot&state){if(ImGui::BeginPopupModal("账号",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){ImGui::SetNextItemWidth(420*scale);ImGui::InputText("服务地址",url,sizeof(url));if(state.user.is_null()){ImGui::InputText("用户名",name,sizeof(name));ImGui::InputText("密码",password,sizeof(password),ImGuiInputTextFlags_Password);ImGui::Checkbox("注册新账号",&registering);caption("用户名 3–32 位字母、数字、下划线；密码至少 10 位");ImGui::BeginDisabled(state.busy);if(primary(registering?"注册并登录":"登录")){s.login(url,name,password,registering);memset(password,0,sizeof(password));}ImGui::EndDisabled();}else{ImGui::Text("已登录：%s",state.user.value("name","").c_str());if(ImGui::Button("退出账号"))s.logout();ImGui::Separator();ImGui::InputText("原密码",old_password,sizeof(old_password),ImGuiInputTextFlags_Password);ImGui::InputText("新密码",new_password,sizeof(new_password),ImGuiInputTextFlags_Password);if(ImGui::Button("修改密码")){s.change_password(old_password,new_password);memset(old_password,0,sizeof(old_password));memset(new_password,0,sizeof(new_password));}}
-  if(!state.error.empty())ImGui::TextWrapped("%s",state.error.c_str());if(ImGui::Button("关闭"))ImGui::CloseCurrentPopup();ImGui::EndPopup();}}
- void sourceProperties(Session&s){if(source<0||source>=int(scene().sources.size()))return;auto&item=scene().sources[source];bool change=false;ImGui::SeparatorText("素材属性");char label[256];snprintf(label,sizeof(label),"%s",item.name.c_str());if(ImGui::InputText("名称",label,sizeof(label))){item.name=label;change=true;}
-  change|=ImGui::Checkbox("显示",&item.visible);ImGui::SameLine();change|=ImGui::Checkbox("锁定",&item.locked);ImGui::BeginDisabled(item.locked);auto&t=item.transform;change|=ImGui::DragFloat2("位置",&t.x,.002f,-2,2,"%.3f");change|=ImGui::DragFloat2("尺寸",&t.width,.002f,.01f,4,"%.3f");change|=ImGui::SliderFloat("旋转",&t.rotation,-180,180,"%.0f°");change|=ImGui::SliderFloat("左裁剪",&t.crop_left,0,.45f);change|=ImGui::SliderFloat("右裁剪",&t.crop_right,0,.45f);change|=ImGui::SliderFloat("上裁剪",&t.crop_top,0,.45f);change|=ImGui::SliderFloat("下裁剪",&t.crop_bottom,0,.45f);if(ImGui::Button("铺满画布")){t={};change=true;}ImGui::EndDisabled();
-  if(item.kind==sdk::StudioSourceKind::text){char text[2048];snprintf(text,sizeof(text),"%s",item.input.c_str());if(ImGui::InputTextMultiline("内容",text,sizeof(text),{0,60*scale})){item.input=text;change=true;}}if(item.kind==sdk::StudioSourceKind::text||item.kind==sdk::StudioSourceKind::color)change|=ImGui::ColorEdit4("颜色",item.color.data());
-  change|=ImGui::Checkbox("绿幕抠像",&item.chroma.enabled);if(item.chroma.enabled){change|=ImGui::ColorEdit3("背景色",item.chroma.color.data());change|=ImGui::SliderFloat("相似度",&item.chroma.similarity,0,1);change|=ImGui::SliderFloat("边缘平滑",&item.chroma.smoothness,.01f,.5f);change|=ImGui::SliderFloat("抑制溢色",&item.chroma.spill,0,1);}
-  if(item.kind==sdk::StudioSourceKind::video){change|=ImGui::Checkbox("循环播放",&item.loop);change|=ImGui::Checkbox("素材静音",&item.muted);change|=ImGui::SliderFloat("素材音量",&item.volume,0,2);}
-  if(change)changed(s);
- }
- void draw(Session&s,SDL_Texture*texture){auto state=s.snapshot();auto media=s.engine()->snapshot();auto viewport=ImGui::GetMainViewport();ImGui::SetNextWindowPos(viewport->WorkPos);ImGui::SetNextWindowSize(viewport->WorkSize);ImGui::Begin("直播伴侣",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
-  ImGui::TextColored({1,.40f,.55f,1},"AV  LIVE STUDIO");ImGui::SameLine(210*scale);ImGui::SetNextItemWidth(std::max(180.f*scale,viewport->WorkSize.x-820*scale));ImGui::InputTextWithHint("##title","填写直播标题",title,sizeof(title));ImGui::SameLine();if(ImGui::Button(state.user.is_null()?"登录 / 注册":state.user.value("name","").c_str()))ImGui::OpenPopup("账号");ImGui::SameLine();ImGui::BeginDisabled(state.busy||state.user.is_null());if(state.broadcast.empty()){if(primary("开始直播"))s.start(title);}else if(primary("结束直播"))ImGui::OpenPopup("确认关播");ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button(media.recording?"停止录制":"本地录制")){if(media.recording)s.engine()->stop_recording();else{auto file=browse(true);if(!file.empty())s.engine()->start_recording(std::filesystem::u8path(file));}}
-  if(ImGui::BeginPopupModal("确认关播",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){ImGui::TextUnformatted("结束本次直播并断开连麦？本地录制可继续。");if(primary("结束直播")){s.stop();ImGui::CloseCurrentPopup();}ImGui::SameLine();if(ImGui::Button("继续直播"))ImGui::CloseCurrentPopup();ImGui::EndPopup();}
-  account(s,state);ImGui::Separator();float available=ImGui::GetContentRegionAvail().y;float panelHeight=available-54*scale;float left=255*scale,right=300*scale;float center=std::max(320*scale,ImGui::GetContentRegionAvail().x-left-right-16*scale);
-  ImGui::BeginChild("left",{left,panelHeight},ImGuiChildFlags_Borders);ImGui::SeparatorText("场景");for(size_t i=0;i<scenes.size();++i){ImGui::PushID(int(i));if(ImGui::Selectable(scenes[i].name.c_str(),selected==i)){selected=i;source=-1;changed(s);}ImGui::PopID();}if(ImGui::Button("新建场景")){if(scenes.size()<20){sdk::StudioScene item;item.id=id();item.name="场景 "+std::to_string(scenes.size()+1);scenes.push_back(item);selected=scenes.size()-1;source=-1;changed(s);}}ImGui::SameLine();ImGui::BeginDisabled(scenes.size()<2);if(ImGui::Button("删除场景")){scenes.erase(scenes.begin()+selected);selected=0;source=-1;changed(s);}ImGui::EndDisabled();
-  char sceneLabel[128];snprintf(sceneLabel,sizeof(sceneLabel),"%s",scene().name.c_str());if(ImGui::InputText("场景名称",sceneLabel,sizeof(sceneLabel))){scene().name=sceneLabel;dirty=true;}ImGui::SeparatorText("素材");if(ImGui::Button("+ 添加素材",{-1,0})){devices.clear();refreshDevices=true;ImGui::OpenPopup("添加素材");}addDialog(s);for(int i=int(scene().sources.size())-1;i>=0;--i){ImGui::PushID(i);auto&item=scene().sources[i];if(ImGui::Selectable((std::string(item.visible?"":"[隐藏] ")+item.name).c_str(),source==i))source=i;ImGui::PopID();}ImGui::BeginDisabled(source<0);if(ImGui::Button("上移")&&source+1<int(scene().sources.size())){std::swap(scene().sources[source],scene().sources[source+1]);source++;changed(s);}ImGui::SameLine();if(ImGui::Button("下移")&&source>0){std::swap(scene().sources[source],scene().sources[source-1]);source--;changed(s);}ImGui::SameLine();if(ImGui::Button("删除")&&source>=0){scene().sources.erase(scene().sources.begin()+source);source=-1;changed(s);}ImGui::EndDisabled();sourceProperties(s);ImGui::EndChild();ImGui::SameLine();
-  ImGui::BeginChild("center",{center,panelHeight},ImGuiChildFlags_Borders);ImGui::TextUnformatted("节目预览");ImGui::SameLine();caption(state.state.c_str());float maxW=ImGui::GetContentRegionAvail().x,maxH=std::max(180*scale,ImGui::GetContentRegionAvail().y-240*scale);auto opts=s.engine()->options();float ratio=float(opts.width)/opts.height;float w=std::min(maxW,maxH*ratio),h=w/ratio;ImVec2 origin=ImGui::GetCursorScreenPos();origin.x+=(maxW-w)/2;ImGui::SetCursorScreenPos(origin);if(texture)ImGui::Image(reinterpret_cast<ImTextureID>(texture),{w,h});else ImGui::Dummy({w,h});ImGui::SetCursorScreenPos(origin);ImGui::InvisibleButton("preview-interaction",{w,h});
-  if(ImGui::IsItemHovered()&&ImGui::IsMouseClicked(0)){auto p=ImGui::GetMousePos();for(int i=int(scene().sources.size())-1;i>=0;--i){auto&t=scene().sources[i].transform;if(scene().sources[i].visible&&p.x>=origin.x+t.x*w&&p.x<=origin.x+(t.x+t.width)*w&&p.y>=origin.y+t.y*h&&p.y<=origin.y+(t.y+t.height)*h){source=i;break;}}}
-  if(source>=0&&source<int(scene().sources.size())){auto&item=scene().sources[source];auto&t=item.transform;ImVec2 a{origin.x+t.x*w,origin.y+t.y*h},b{a.x+t.width*w,a.y+t.height*h};ImGui::GetWindowDrawList()->AddRect(a,b,IM_COL32(255,82,121,255),0,0,2);ImGui::GetWindowDrawList()->AddRectFilled({b.x-5,b.y-5},{b.x+5,b.y+5},IM_COL32(255,82,121,255));if(!item.locked&&ImGui::IsItemActive()&&ImGui::IsMouseDragging(0)){auto d=ImGui::GetIO().MouseDelta;if(ImGui::GetIO().KeyShift){t.width=std::clamp(t.width+d.x/w,.01f,4.f);t.height=std::clamp(t.height+d.y/h,.01f,4.f);}else{t.x=std::clamp(t.x+d.x/w,-2.f,2.f);t.y=std::clamp(t.y+d.y/h,-2.f,2.f);}changed(s);}}
-  caption("拖动移动素材 · Shift + 拖动调整尺寸 · 属性面板可精确输入");ImGui::SeparatorText("混音器");bool change=false;change|=ImGui::Checkbox("麦克风",&audio.microphone);ImGui::SameLine();ImGui::SetNextItemWidth(130*scale);change|=ImGui::SliderFloat("##mic",&audio.microphone_volume,0,2,"%.2f");ImGui::SameLine();ImGui::ProgressBar(std::min(media.microphone_peak,1.f),{std::max(50.f,maxW-260*scale),18*scale},"");change|=ImGui::Checkbox("系统声音",&audio.system);ImGui::SameLine();ImGui::SetNextItemWidth(130*scale);change|=ImGui::SliderFloat("##sys",&audio.system_volume,0,2,"%.2f");ImGui::SameLine();ImGui::ProgressBar(std::min(media.system_peak,1.f),{std::max(50.f,maxW-260*scale),18*scale},"");change|=ImGui::Checkbox("监听连麦声音",&audio.monitor);ImGui::SameLine();ImGui::SetNextItemWidth(130*scale);change|=ImGui::SliderFloat("连麦音量",&audio.remote_volume,0,2,"%.2f");if(change)changed(s);
-  ImGui::SeparatorText("画布设置");ImGui::BeginDisabled(!state.broadcast.empty()||media.recording);const char*formats[]{"横屏 1280 × 720","竖屏 720 × 1280","横屏 1920 × 1080","竖屏 1080 × 1920"};int fmt=opts.width==1280?0:opts.width==720?1:opts.width==1920?2:3;ImGui::SetNextItemWidth(220*scale);if(ImGui::Combo("输出 · 30 fps",&fmt,formats,4)){options=opts;options.width=std::array<int,4>{1280,720,1920,1080}[fmt];options.height=std::array<int,4>{720,1280,1080,1920}[fmt];float aspectChange=(float(options.width)/options.height)/(float(opts.width)/opts.height);for(auto&entry:scenes)for(auto&item:entry.sources)if(item.kind==sdk::StudioSourceKind::text)item.transform.height=std::clamp(item.transform.height*aspectChange,.01f,4.f);s.set_scene(scene());s.reconfigure(options);dirty=true;}ImGui::EndDisabled();for(auto&[id,text]:media.source_errors)ImGui::TextWrapped("设备/素材：%s",text.c_str());ImGui::EndChild();ImGui::SameLine();
-  ImGui::BeginChild("right",{right,panelHeight},ImGuiChildFlags_Borders);ImGui::SeparatorText("直播互动");if(state.live.is_object()){ImGui::Text("在线 %d 人",state.live.value("online",0));ImGui::SameLine();if(ImGui::Button("复制观看地址")){auto share=state.server_url+"/apps/live-studio/#room/"+state.live.at("broadcast").at("room").get<std::string>();ImGui::SetClipboardText(share.c_str());}}if(ImGui::BeginTabBar("interaction")){if(ImGui::BeginTabItem("聊天")){ImGui::BeginChild("messages",{0,std::max(160.f*scale,panelHeight-180*scale)});for(auto&e:state.events){auto kind=e.value("kind","");if(kind!="chat"&&kind!="gift")continue;auto p=e.value("payload",Json::object());if(kind=="gift")ImGui::TextWrapped("%s 送出 %d 分礼物",p.value("name","").c_str(),p.value("points",0));else ImGui::TextWrapped("%s：%s",p.value("name","").c_str(),p.value("text","").c_str());}if(ImGui::GetScrollY()>=ImGui::GetScrollMaxY()-30)ImGui::SetScrollHereY(1);ImGui::EndChild();ImGui::SetNextItemWidth(-1);bool send=ImGui::InputTextWithHint("##chat","输入消息…",message,sizeof(message),ImGuiInputTextFlags_EnterReturnsTrue);if(ImGui::Button("发送",{-1,0})||send){if(message[0]){s.command("chat",{{"text",message}});message[0]=0;}}ImGui::EndTabItem();}
-   if(ImGui::BeginTabItem("连麦")){if(state.live.is_object()){for(auto&g:state.live.value("guests",Json::array())){auto uid=g.value("user_id","");ImGui::PushID(uid.c_str());ImGui::Text("%s",g.value("name","").c_str());auto gs=g.value("state","");if(gs=="pending"){if(ImGui::Button("接受"))s.command("guest/approve",{{"target",uid}});ImGui::SameLine();if(ImGui::Button("拒绝"))s.command("guest/reject",{{"target",uid}});}else if(gs=="approved"){if(ImGui::Button("结束连麦"))s.command("guest/end",{{"target",uid}});}ImGui::PopID();}ImGui::SeparatorText("在线成员");for(auto&v:state.live.value("viewers",Json::array())){if(!state.user.is_null()&&v.value("user_id","")==state.user.value("id",""))continue;auto uid=v.value("identity","");ImGui::PushID(uid.c_str());ImGui::Text("%s",v.value("name","").c_str());bool muted=v.value("muted",false);if(ImGui::Button(muted?"解除禁言":"禁言"))s.command("mute",{{"target",uid},{"enabled",!muted}});ImGui::SameLine();if(ImGui::Button("移出"))s.command("kick",{{"target",uid}});ImGui::PopID();}}else caption("开播后可以管理连麦申请");ImGui::EndTabItem();}
-   if(ImGui::BeginTabItem("PK / 榜单")){auto pk=state.live.is_object()?state.live.value("pk",Json()):Json();if(pk.is_object()){ImGui::Text("PK %s",pk.value("state","").c_str());ImGui::Text("%d : %d",pk.value("score_a",0),pk.value("score_b",0));auto ps=pk.value("state","");if(ps=="invited"&&pk.value("b","")==state.broadcast){if(primary("接受 PK"))s.command("pk/accept");ImGui::SameLine();if(ImGui::Button("拒绝"))s.command("pk/reject");}if(ps=="active"||ps=="invited"){if(ImGui::Button("退出 PK"))s.command("pk/leave");}}
-    if(ImGui::Button("刷新可连线主播"))s.refresh_rooms();for(auto&r:state.rooms){if(r.value("state","")!="live"||r.value("broadcast","")==state.broadcast)continue;ImGui::PushID(r.value("id","").c_str());ImGui::TextWrapped("%s",r.value("title","").c_str());if(ImGui::Button("邀请 PK"))s.command("pk/invite",{{"target",r.at("broadcast")}});ImGui::PopID();}ImGui::SeparatorText("本场贡献榜");if(state.live.is_object())for(auto&entry:state.live.value("leaderboard",Json::array()))ImGui::Text("%s · %d 分",entry.value("name","").c_str(),entry.value("points",0));ImGui::EndTabItem();}ImGui::EndTabBar();}ImGui::EndChild();
-  auto ticks=SDL_GetTicks64();if(ticks-fpsTime>=1000){actualFps=double(media.frames-fpsFrames)*1000/double(ticks-fpsTime);fpsFrames=media.frames;fpsTime=ticks;}ImGui::Separator();ImGui::Text("%s  |  %d × %d / %.1f fps  |  已合成 %llu 帧  |  丢帧 %llu%s",state.state.c_str(),opts.width,opts.height,actualFps,static_cast<unsigned long long>(media.frames),static_cast<unsigned long long>(media.dropped),media.recording?"  |  正在录制":"");if(!state.broadcast.empty()){ImGui::SameLine();ImGui::Text(" |  发送 %.1f fps / %.0f kbps",state.publish_fps,state.bitrate_kbps);}auto err=!error.empty()?error:!state.error.empty()?state.error:media.error;if(!err.empty())ImGui::TextColored({1,.55f,.57f,1},"%s",err.c_str());ImGui::End();
-  if(dirty&&SDL_GetTicks64()-lastSave>1000){try{sdk::Studio::save_project(project,scenes,selected,options,audio);dirty=false;lastSave=SDL_GetTicks64();}catch(const std::exception&e){error=e.what();}}
- }
-};
-int run(const std::vector<std::string>&args){bool hidden=false,portrait=false;float uiScale=0,testDensity=1;int frames=0;std::string screenshot;std::filesystem::path settings=platform::default_settings();for(size_t i=1;i<args.size();++i){if(args[i]=="--hidden")hidden=true;else if(args[i]=="--test-density"&&i+1<args.size())testDensity=std::clamp(std::stof(args[++i]),1.f,2.f);else if(args[i]=="--ui-scale"&&i+1<args.size())uiScale=std::clamp(std::stof(args[++i]),1.f,2.f);else if(args[i]=="--portrait")portrait=true;else if(args[i]=="--frames"&&i+1<args.size())frames=std::stoi(args[++i]);else if(args[i]=="--screenshot"&&i+1<args.size())screenshot=args[++i];else if(args[i]=="--settings"&&i+1<args.size())settings=std::filesystem::u8path(args[++i]);else if(args[i]=="--help"){std::cout<<"av_live_studio [--hidden --frames N --screenshot file.bmp --settings directory]\n";return 0;}else throw std::invalid_argument("Unknown option");}
- if(testDensity!=1&&!hidden)throw std::invalid_argument("--test-density requires --hidden");
- SDL_SetMainReady();SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS,"permonitorv2");check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER)==0);if(uiScale==0){float dpi=96;
-#ifndef __APPLE__
- if(!hidden)SDL_GetDisplayDPI(0,&dpi,nullptr,nullptr);
-#endif
-uiScale=std::clamp(dpi/96.f,1.f,2.f);}int windowWidth=int(1480*uiScale*testDensity),windowHeight=int(900*uiScale*testDensity);
- if(!hidden){SDL_Rect usable{};if(SDL_GetDisplayUsableBounds(0,&usable)==0){windowWidth=std::min(windowWidth,usable.w);windowHeight=std::min(windowHeight,std::max(480,usable.h-40));}}
- auto*window=SDL_CreateWindow("AV 直播伴侣",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,windowWidth,windowHeight,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|(hidden?SDL_WINDOW_HIDDEN:0));check(window!=nullptr);SDL_SetWindowMinimumSize(window,std::min(windowWidth,int(1280*uiScale)),std::min(windowHeight,int(760*uiScale)));auto*renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);check(renderer!=nullptr);IMGUI_CHECKVERSION();ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard;float backing=hidden?testDensity:density(window,renderer);fonts(uiScale,backing);theme();ImGui::GetStyle().ScaleAllSizes(uiScale);check(ImGui_ImplSDL2_InitForSDLRenderer(window,renderer));check(ImGui_ImplSDLRenderer2_Init(renderer));SDL_Texture*texture=nullptr;int tw=0,th=0;int result=0;
- try{UI ui;ui.scale=uiScale;ui.project=settings/L"project.json";ui.options.software_gpu=hidden;std::vector<sdk::StudioScene>stored;if(std::filesystem::exists(ui.project)){try{stored=sdk::Studio::load_project(ui.project,ui.selected,ui.options,ui.audio);}catch(const std::exception&e){ui.error=e.what();}}if(portrait){ui.options.width=720;ui.options.height=1280;}Session session(settings/L"account.bin",ui.options);ui.init(session);std::shared_ptr<const sdk::StudioImage>last;bool quit=false;int count=0;while(!quit){SDL_Event e;while(SDL_PollEvent(&e)){ImGui_ImplSDL2_ProcessEvent(&e);if(e.type==SDL_QUIT||(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_CLOSE))quit=true;}auto snapshot=session.engine()->snapshot();if(snapshot.preview&&snapshot.preview!=last){auto&p=*snapshot.preview;if(!texture||tw!=p.width||th!=p.height){if(texture)SDL_DestroyTexture(texture);texture=SDL_CreateTexture(renderer,SDL_PIXELFORMAT_RGBA32,SDL_TEXTUREACCESS_STREAMING,p.width,p.height);check(texture!=nullptr);tw=p.width;th=p.height;}check(SDL_UpdateTexture(texture,nullptr,p.rgba.data(),p.width*4)==0);last=snapshot.preview;}
-  float nextBacking=hidden?testDensity:density(window,renderer);if(nextBacking!=backing){backing=nextBacking;ImGui_ImplSDLRenderer2_DestroyFontsTexture();fonts(uiScale,backing);}
-  ImGui_ImplSDLRenderer2_NewFrame();ImGui_ImplSDL2_NewFrame();if(hidden&&testDensity!=1){auto&io=ImGui::GetIO();io.DisplaySize={1480*uiScale,900*uiScale};io.DisplayFramebufferScale={testDensity,testDensity};}ImGui::NewFrame();try{ui.draw(session,texture);}catch(const std::exception&e){ui.error=e.what();}ImGui::Render();SDL_SetRenderDrawColor(renderer,13,16,23,255);SDL_RenderClear(renderer);check(SDL_RenderSetScale(renderer,ImGui::GetIO().DisplayFramebufferScale.x,ImGui::GetIO().DisplayFramebufferScale.y)==0);ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(),renderer);if(!screenshot.empty()&&count>8&&texture){saveShot(renderer,screenshot);screenshot.clear();}SDL_RenderPresent(renderer);if(frames>0&&++count>=frames)quit=true;else if(frames==0)++count;SDL_Delay(8);}
-  if(!screenshot.empty())throw std::runtime_error("No preview available for screenshot");
-  if(hidden&&!session.engine()->snapshot().error.empty())throw std::runtime_error(session.engine()->snapshot().error);
-  if(ui.dirty)sdk::Studio::save_project(ui.project,ui.scenes,ui.selected,ui.options,ui.audio);
- }catch(const std::exception&e){std::cerr<<e.what()<<'\n';result=1;}if(texture)SDL_DestroyTexture(texture);ImGui_ImplSDLRenderer2_Shutdown();ImGui_ImplSDL2_Shutdown();ImGui::DestroyContext();SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);SDL_Quit();return result;
+int main(int argc,char** argv) {
+  // Select the offscreen platform before Qt initializes any native window.
+  bool hidden=false;
+  for(int i=1;i<argc;++i)if(std::string_view(argv[i])=="--hidden")hidden=true;
+  if(hidden)studio_app::configureOffscreenPlatform();
+  QApplication app(argc,argv);
+  QApplication::setApplicationName("AV Live Studio");
+  QCommandLineParser parser;parser.setApplicationDescription(QStringLiteral("Qt 6 直播助手"));parser.addHelpOption();
+  parser.addOption({"hidden",QStringLiteral("离屏运行，不访问设备或保存的账号")});
+  parser.addOption({"frames",QStringLiteral("渲染 N 次后退出"),"N","0"});
+  parser.addOption({"settings",QStringLiteral("项目配置目录"),"directory"});
+  parser.addOption({"screenshot",QStringLiteral("保存程序内渲染截图"),"file"});
+  parser.addOption({"portrait",QStringLiteral("使用 720 × 1280 画布")});
+  parser.addOption({"test-density",QStringLiteral("离屏截图像素倍率，1–2"),"scale","1"});
+  parser.addOption({"ui-scale",QStringLiteral("界面字号倍率，1–2；屏幕 DPI 由 Qt 自动处理"),"scale","1"});
+  parser.process(app);
+  try {
+    bool valid=false;int frames=parser.value("frames").toInt(&valid);if(!valid||frames<0)throw std::invalid_argument("--frames must be a nonnegative integer");
+    double density=parser.value("test-density").toDouble(&valid);if(!valid||density<1||density>2||(!hidden&&density!=1))throw std::invalid_argument("--test-density must be 1..2 and requires --hidden");
+    double scale=parser.value("ui-scale").toDouble(&valid);if(!valid||scale<1||scale>2)throw std::invalid_argument("--ui-scale must be 1..2");
+    if(hidden&&!parser.isSet("settings"))throw std::invalid_argument("--hidden requires an isolated --settings directory");
+    studio_app::applyTheme();
+    if(scale!=1)app.setStyleSheet(app.styleSheet()+QString("\nQWidget { font-size: %1px; }").arg(13*scale));
+    studio_app::WindowOptions config;
+    config.offline=hidden;config.portrait=parser.isSet("portrait");config.settings=parser.isSet("settings")?std::filesystem::u8path(parser.value("settings").toUtf8().toStdString()):studio_app::platform::default_settings();
+    studio_app::Window window(config);
+    if(hidden)window.setAttribute(Qt::WA_DontShowOnScreen);
+    window.show();
+    int count=0,result=0;bool captured=false;QString screenshot=parser.value("screenshot");
+    QTimer timer;
+    QObject::connect(&timer,&QTimer::timeout,&app,[&]{
+      ++count;
+      auto media=window.mediaSnapshot();
+      bool finish=frames>0&&count>=frames;
+      if(!screenshot.isEmpty()&&!captured&&count>=10&&media.preview){
+        QImage image(QSize(qRound(window.width()*density),qRound(window.height()*density)),QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(density);image.fill(Qt::transparent);window.render(&image);
+        if(!image.save(screenshot)){std::cerr<<"Cannot save screenshot\n";result=1;finish=true;}else captured=true;
+      }
+      if(finish){
+        if(!screenshot.isEmpty()&&!captured){std::cerr<<"No screenshot produced\n";result=1;}
+        if(hidden&&!media.error.empty()){std::cerr<<media.error<<'\n';result=1;}
+        if(!window.saveProject())result=1;
+        app.exit(result);
+      }
+    });
+    timer.start(33);
+    return app.exec();
+  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }
-}
-#ifdef _WIN32
-int wmain(int argc,wchar_t**argv){try{std::vector<std::string>args;for(int i=0;i<argc;++i)args.push_back(utf8(argv[i]));return run(args);}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
-
-#else
-int main(int argc,char**argv){try{return run(std::vector<std::string>(argv,argv+argc));}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
-#endif

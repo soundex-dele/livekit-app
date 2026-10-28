@@ -12,7 +12,7 @@ namespace sdk=livekit::sdk;using Json=sdk::Json;
 struct Snapshot {Json user,live,rooms=Json::array(),events=Json::array();std::string server_url,broadcast,error,state="未开播";bool busy=false,connected=false;double bitrate_kbps=0,publish_fps=0;Json media_stats=Json::array();};
 class Session {
  public:
- Session(std::filesystem::path settings,sdk::StudioOptions options);
+ Session(std::filesystem::path settings,sdk::StudioOptions options,bool offline=false);
  ~Session();
  std::shared_ptr<sdk::Studio> engine()const;
  Snapshot snapshot()const;
