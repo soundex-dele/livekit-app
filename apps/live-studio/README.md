@@ -19,6 +19,20 @@ Windows 11 x64 原生直播工作台和浏览器观看端。桌面使用 C++20�
 
 Studio 使用系统 D3D11、WGC、WASAPI、WIC，文件解码和录制使用 FFmpeg；合成采用 GPU 渲染后读回 I420 供既有 SDK 发布，不是端到端 GPU 零拷贝。硬件设备失败会在工作台显示错误。自动化测试可用 WARP，无需访问桌面采集设备。
 
+## 媒体流水线
+
+SDK 的 `StudioGraph` 使用 GraphEngine 管理 9 个节点的连接及 init/start/stop/release 生命周期：时钟、素材源、混音、合成、音频输出、视频输出、预览、监听和录制。场景增删在素材源节点内更新设备和播放器，图的输出连接保持稳定。
+
+```text
+clock ──→ sources ──AudioInput──→ mixer ──MixedAudio──→ audio-output / monitor / recorder
+  │           └──VideoLayers──→ compositor ──ComposedVideo──→ video-output / preview / recorder
+  └──录制控制──→ recorder
+```
+
+媒体事件沿有类型的图边同步传递；同一工作线程驱动 10 ms 音频和 30 fps 视频节拍，设备采集及录制保留各自的线程和有界队列。大帧通过不可变共享数据分发，GraphEngine 不额外异步积压媒体事件。Local 输出不含远端音视频，供连麦房间发布；Program 输出含远端，供观众、预览和录制使用。监听只播放远端声音。
+
+停止时先停止时钟驱动，再由图节点关闭采集并排空录制；释放时关闭四路输出，并在工作线程退出 COM apartment 前释放 D3D11 资源。节点处理异常会传回 Studio 的错误状态，录制失败独立报告并保留预览与发布。
+
 当前示例 FFmpeg 包为 GPL 构建，分发前应随包提供该版本及其组件的许可证、对应源码或合规源码提供方式；SDL2 为 zlib、ImGui 为 MIT，其余依赖以各源码 LICENSE 为准。打包脚本汇集运行文件与可找到的许可证，当前包用于本地验收；公开分发前还需完成依赖及源码提供方式核对。
 
 ## 服务与账号
@@ -61,6 +75,8 @@ npm run test:integration
 端到端测试启动独立业务与媒体进程、使用 headless Chrome 和合成音视频；输出位于 `livekit-app/out/live-studio/integration-*`，包含报告、日志与浏览器截图。可用 `STUDIO_BROWSER_CHANNEL` 指定已安装浏览器通道。
 
 桌面测试参数为 `--hidden --frames 60 --settings <测试目录> --screenshot <BMP路径>`；不得使用真实账号配置目录进行自动化测试。SDK 测试执行 CPU/WARP 合成、绿幕、混音、项目恢复与 MKV→MP4 录制，不访问用户桌面。
+
+`studio_graph` 测试使用 WARP、合成色块和 PCM 验证真实图边的数据传递、Local/Program 隔离、场景更新、发布背压、图停止/重启/释放、录制收尾及节点异常传播，不访问真实采集或播放设备。
 
 数据库备份使用 SQLite 在线备份或 `VACUUM INTO`，不要只复制运行中的主数据库而遗漏 WAL。恢复前停止业务和媒体进程，替换数据库后重启；未结束直播会在启动时终止，PK 不自动恢复。录制文件及本地场景需要另外备份。
 
