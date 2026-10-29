@@ -15,20 +15,23 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <map>
+
 namespace screen_cast {
 QString normalizedCode(QString text) {
   return text.remove(QRegularExpression("\\s"));
 }
-bool validCode(const QString &text) {
+
+bool validCode(const QString& text) {
   return QRegularExpression("^[0-9]{10}$").match(text).hasMatch();
 }
-bool validServer(const QString &text) {
+
+bool validServer(const QString& text) {
   QUrl u(text, QUrl::StrictMode);
-  return u.isValid() && (u.scheme() == "http" || u.scheme() == "https") &&
-         !u.host().isEmpty() && u.userInfo().isEmpty() && !u.hasQuery() &&
-         !u.hasFragment();
+  return u.isValid() && (u.scheme() == "http" || u.scheme() == "https") && !u.host().isEmpty() &&
+         u.userInfo().isEmpty() && !u.hasQuery() && !u.hasFragment();
 }
-QString readableError(const std::string &error) {
+
+QString readableError(const std::string& error) {
   const auto e = QString::fromStdString(error);
   if (e.isEmpty())
     return {};
@@ -41,8 +44,7 @@ QString readableError(const std::string &error) {
     return "投屏码不可用或已过期，请在接收端生成新投屏码。";
   if (e.contains("rate_limited"))
     return "操作过于频繁，请稍后重试。";
-  if (e.contains("Display", Qt::CaseInsensitive) ||
-      e.contains("display", Qt::CaseInsensitive))
+  if (e.contains("Display", Qt::CaseInsensitive) || e.contains("display", Qt::CaseInsensitive))
     return "显示器已断开或显示模式发生变化，请刷新并重新选择屏幕。";
   if (e.contains("heartbeat_timeout"))
     return "连接超时，请检查网络并重新生成投屏码。";
@@ -50,37 +52,43 @@ QString readableError(const std::string &error) {
     return "媒体服务不可用，请检查服务配置后重试。";
   return "投屏未能完成，请检查服务器地址和网络后重试。";
 }
+
 namespace {
-QLabel *label(QString text, QString role = {}, QWidget *parent = nullptr) {
-  auto *w = new QLabel(text, parent);
+QLabel* label(QString text, QString role = {}, QWidget* parent = nullptr) {
+  auto* w = new QLabel(text, parent);
   w->setWordWrap(true);
   if (!role.isEmpty())
     w->setProperty("role", role);
   return w;
 }
-QFrame *card() {
-  auto *w = new QFrame;
+
+QFrame* card() {
+  auto* w = new QFrame;
   w->setObjectName("card");
   return w;
 }
-QPushButton *button(QString text, QString name) {
-  auto *b = new QPushButton(text);
+
+QPushButton* button(QString text, QString name) {
+  auto* b = new QPushButton(text);
   b->setObjectName(name);
   b->setMinimumHeight(40);
   b->setCursor(Qt::PointingHandCursor);
   return b;
 }
-} // namespace
-Preview::Preview(QWidget *p) : QWidget(p) {
+}  // namespace
+
+Preview::Preview(QWidget* p) : QWidget(p) {
   setMinimumSize(160, 120);
   setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   setAccessibleName("共享屏幕预览");
 }
+
 void Preview::present(QImage image) {
   image_ = std::move(image);
   update();
 }
-void Preview::paintEvent(QPaintEvent *) {
+
+void Preview::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing);
   p.setPen(Qt::NoPen);
@@ -102,11 +110,11 @@ void Preview::paintEvent(QPaintEvent *) {
   p.drawLine(c + QPoint(0, 33), c + QPoint(0, 49));
   p.drawLine(c + QPoint(-26, 49), c + QPoint(26, 49));
   p.setPen(QColor("#52627a"));
-  p.drawText(QRect(12, c.y() + 67, width() - 24, 44),
-             Qt::AlignCenter | Qt::TextWordWrap,
+  p.drawText(QRect(12, c.y() + 67, width() - 24, 44), Qt::AlignCenter | Qt::TextWordWrap,
              "连接成功后，画面将在这里显示");
 }
-Window::Window(QWidget *p) : QMainWindow(p) {
+
+Window::Window(QWidget* p) : QMainWindow(p) {
   setWindowTitle("局域网传屏");
   setMinimumSize(800, 600);
   resize(1040, 720);
@@ -121,16 +129,16 @@ Window::Window(QWidget *p) : QMainWindow(p) {
  QPushButton[nav="true"]{text-align:left;border:0;background:transparent;padding:12px 16px;} QPushButton[nav="true"]:checked{background:#eaf1ff;color:#245ec7;font-weight:600;}
  QListWidget{background:white;border:1px solid #c6d1e2;border-radius:8px;outline:0;} QListWidget::item{padding:10px;border-bottom:1px solid #edf1f7;} QListWidget::item:selected{background:#eaf1ff;color:#164ca9;}
  )");
-  auto *root = new QWidget;
+  auto* root = new QWidget;
   root->setObjectName("root");
   setCentralWidget(root);
-  auto *layout = new QHBoxLayout(root);
+  auto* layout = new QHBoxLayout(root);
   layout->setContentsMargins(16, 16, 16, 16);
   layout->setSpacing(20);
-  auto *side = new QFrame;
+  auto* side = new QFrame;
   side->setObjectName("sidebar");
   side->setFixedWidth(156);
-  auto *nav = new QVBoxLayout(side);
+  auto* nav = new QVBoxLayout(side);
   nav->setContentsMargins(12, 24, 12, 16);
   nav->setSpacing(12);
   nav->addWidget(label("局域网传屏", "heading"));
@@ -139,8 +147,7 @@ Window::Window(QWidget *p) : QMainWindow(p) {
   pages_ = new QStackedWidget;
   pages_->setObjectName("pages");
   for (int i = 0; i < 3; ++i) {
-    auto *b = button(QStringList{"投屏", "设置", "帮助"}[i],
-                     "nav" + QString::number(i));
+    auto* b = button(QStringList{"投屏", "设置", "帮助"}[i], "nav" + QString::number(i));
     b->setProperty("nav", true);
     b->setCheckable(true);
     b->setAutoExclusive(true);
@@ -148,15 +155,14 @@ Window::Window(QWidget *p) : QMainWindow(p) {
     if (i == 0)
       b->setChecked(true);
     nav->addWidget(b);
-    connect(b, &QPushButton::clicked, this,
-            [this, i] { pages_->setCurrentIndex(i); });
+    connect(b, &QPushButton::clicked, this, [this, i] { pages_->setCurrentIndex(i); });
   }
   nav->addStretch();
   nav->addWidget(label("安全连接\n一次一码", "muted"));
   layout->addWidget(side);
   layout->addWidget(pages_, 1);
-  auto *home = new QWidget;
-  auto *body = new QVBoxLayout(home);
+  auto* home = new QWidget;
+  auto* body = new QVBoxLayout(home);
   body->setContentsMargins(0, 8, 0, 0);
   body->setSpacing(14);
   body->addWidget(label("分享你的屏幕", "title"));
@@ -165,28 +171,28 @@ Window::Window(QWidget *p) : QMainWindow(p) {
   status_->setObjectName("status");
   status_->setAccessibleName("投屏状态");
   body->addWidget(status_);
-  auto *columns = new QHBoxLayout;
+  auto* columns = new QHBoxLayout;
   columns->setSpacing(16);
-  auto *connection = card();
+  auto* connection = card();
   connection->setMinimumWidth(278);
   connection->setMaximumWidth(340);
-  auto *form = new QVBoxLayout(connection);
+  auto* form = new QVBoxLayout(connection);
   form->setContentsMargins(16, 16, 16, 16);
   form->setSpacing(10);
-  auto *codeLabel = label("接收端投屏码", "heading");
+  auto* codeLabel = label("接收端投屏码", "heading");
   form->addWidget(codeLabel);
   code_ = new QLineEdit;
   code_->setObjectName("code");
-  code_->setValidator(new QRegularExpressionValidator(
-      QRegularExpression("(?:\\s*[0-9]){10}\\s*"), code_));
+  code_->setValidator(
+      new QRegularExpressionValidator(QRegularExpression("(?:\\s*[0-9]){10}\\s*"), code_));
   code_->setMaxLength(64);
   code_->setPlaceholderText("输入 10 位投屏码");
   code_->setAccessibleName("10 位投屏码");
   codeLabel->setBuddy(code_);
   form->addWidget(code_);
   form->addWidget(label("投屏码有效期为 5 分钟，仅可使用一次。", "muted"));
-  auto *displayLabel = label("选择共享屏幕", "heading");
-  auto *displayHeader = new QHBoxLayout;
+  auto* displayLabel = label("选择共享屏幕", "heading");
+  auto* displayHeader = new QHBoxLayout;
   displayHeader->addWidget(displayLabel, 1);
   refresh_ = button("刷新", "refresh");
   refresh_->setMinimumHeight(32);
@@ -203,8 +209,8 @@ Window::Window(QWidget *p) : QMainWindow(p) {
   stop_ = button("停止投屏", "stop");
   form->addWidget(stop_);
   columns->addWidget(connection);
-  auto *previewCard = card();
-  auto *pv = new QVBoxLayout(previewCard);
+  auto* previewCard = card();
+  auto* pv = new QVBoxLayout(previewCard);
   pv->setContentsMargins(16, 16, 16, 16);
   pv->addWidget(label("屏幕预览", "heading"));
   preview_ = new Preview;
@@ -220,27 +226,27 @@ Window::Window(QWidget *p) : QMainWindow(p) {
   body->addWidget(error_);
   body->addWidget(label("最小化后继续共享，关闭窗口将停止投屏。", "muted"));
   pages_->addWidget(home);
-  auto *settings = new QWidget;
-  auto *sl = new QVBoxLayout(settings);
+  auto* settings = new QWidget;
+  auto* sl = new QVBoxLayout(settings);
   sl->setContentsMargins(0, 8, 0, 0);
   sl->setSpacing(20);
   sl->addWidget(label("连接设置", "title"));
-  auto *sc = card();
-  auto *sf = new QVBoxLayout(sc);
+  auto* sc = card();
+  auto* sf = new QVBoxLayout(sc);
   sf->setContentsMargins(24, 24, 24, 24);
   sf->setSpacing(16);
-  auto *serverLabel = label("服务器地址", "heading");
+  auto* serverLabel = label("服务器地址", "heading");
   sf->addWidget(serverLabel);
   server_ = new QLineEdit;
   server_->setObjectName("server");
   server_->setAccessibleName("服务器地址");
   serverLabel->setBuddy(server_);
-  server_->setText(
-      QSettings().value("server", "http://127.0.0.1:8080").toString());
+  server_->setText(QSettings().value("server", "http://127.0.0.1:8080").toString());
   sf->addWidget(server_);
-  sf->addWidget(label("发送端与接收端需连接同一服务。跨设备使用时，请填写服务所"
-                      "在电脑的局域网地址。",
-                      "muted"));
+  sf->addWidget(
+      label("发送端与接收端需连接同一服务。跨设备使用时，请填写服务所"
+            "在电脑的局域网地址。",
+            "muted"));
   save_ = button("保存设置", "save");
   sf->addWidget(save_);
   serverHint_ = label("");
@@ -249,25 +255,23 @@ Window::Window(QWidget *p) : QMainWindow(p) {
   sl->addWidget(sc);
   sl->addStretch();
   pages_->addWidget(settings);
-  auto *help = new QWidget;
-  auto *hl = new QVBoxLayout(help);
+  auto* help = new QWidget;
+  auto* hl = new QVBoxLayout(help);
   hl->setContentsMargins(0, 8, 0, 0);
   hl->setSpacing(24);
   hl->addWidget(label("开始你的第一次投屏", "title"));
-  for (auto text :
-       {"01  在接收设备浏览器打开服务器地址下的 "
-        "/apps/screen-cast/，点击「接收投屏」。",
-        "02  在本应用「设置」中填写相同的服务器地址。",
-        "03  输入接收端显示的 10 位投屏码，选择屏幕，点击「开始投屏」。",
-        "macOS "
-        "首次使用需允许屏幕录制权限。若显示器或分辨率变化，请停止后刷新并重新连"
-        "接。"})
+  for (auto text : {"01  在接收设备浏览器打开服务器地址下的 "
+                    "/apps/screen-cast/，点击「接收投屏」。",
+                    "02  在本应用「设置」中填写相同的服务器地址。",
+                    "03  输入接收端显示的 10 位投屏码，选择屏幕，点击「开始投屏」。",
+                    "macOS "
+                    "首次使用需允许屏幕录制权限。若显示器或分辨率变化，请停止后刷新并重新连"
+                    "接。"})
     hl->addWidget(label(text));
-  hl->addWidget(
-      label("仅适用于可信局域网 · 不传输声音 · 不提供远程控制", "muted"));
+  hl->addWidget(label("仅适用于可信局域网 · 不传输声音 · 不提供远程控制", "muted"));
   hl->addStretch();
   pages_->addWidget(help);
-  connect(code_, &QLineEdit::textChanged, this, [this](const QString &t) {
+  connect(code_, &QLineEdit::textChanged, this, [this](const QString& t) {
     auto n = normalizedCode(t);
     if (n != t) {
       const auto pos = code_->cursorPosition();
@@ -280,8 +284,7 @@ Window::Window(QWidget *p) : QMainWindow(p) {
     serverHint_->clear();
     updateControls();
   });
-  connect(displays_, &QListWidget::currentRowChanged, this,
-          [this] { updateControls(); });
+  connect(displays_, &QListWidget::currentRowChanged, this, [this] { updateControls(); });
   connect(save_, &QPushButton::clicked, this, [this] {
     QSettings().setValue("server", server());
     serverHint_->setText("设置已保存");
@@ -302,32 +305,34 @@ Window::Window(QWidget *p) : QMainWindow(p) {
     emit stopRequested();
   });
   connect(refresh_, &QPushButton::clicked, this, &Window::refreshRequested);
-  resize(QSettings()
-             .value("size", QSize(1040, 720))
-             .toSize()
-             .expandedTo(minimumSize()));
+  resize(QSettings().value("size", QSize(1040, 720)).toSize().expandedTo(minimumSize()));
   updateControls();
 }
-QString Window::server() const { return server_->text().trimmed(); }
-QString Window::code() const { return code_->text(); }
+
+QString Window::server() const {
+  return server_->text().trimmed();
+}
+
+QString Window::code() const {
+  return code_->text();
+}
+
 livekit::sdk::ScreenCaptureDevice Window::selectedDevice() const {
   int i = displays_->currentRow();
-  return i >= 0 && i < int(devices_.size())
-             ? devices_[i]
-             : livekit::sdk::ScreenCaptureDevice{};
+  return i >= 0 && i < int(devices_.size()) ? devices_[i] : livekit::sdk::ScreenCaptureDevice{};
 }
-void Window::setDevices(
-    std::vector<livekit::sdk::ScreenCaptureDevice> devices) {
+
+void Window::setDevices(std::vector<livekit::sdk::ScreenCaptureDevice> devices) {
   auto id = selectedDevice().id;
   devices_ = std::move(devices);
   displays_->clear();
   int selected = 0;
   for (int i = 0; i < int(devices_.size()); ++i) {
-    const auto &d = devices_[i];
-    auto *item = new QListWidgetItem(
-        QString::fromStdString(d.name) + (d.primary ? " · 主屏" : "") + "\n" +
-            QString::number(d.width) + " × " + QString::number(d.height),
-        displays_);
+    const auto& d = devices_[i];
+    auto* item =
+        new QListWidgetItem(QString::fromStdString(d.name) + (d.primary ? " · 主屏" : "") + "\n" +
+                                QString::number(d.width) + " × " + QString::number(d.height),
+                            displays_);
     item->setToolTip(QString::fromStdString(d.id));
     if (d.id == id || (id.empty() && d.primary))
       selected = i;
@@ -338,17 +343,23 @@ void Window::setDevices(
     showError("未发现可用显示器，请连接显示器后刷新。");
   updateControls();
 }
+
 void Window::setEnumerating(bool busy) {
   enumerating_ = busy;
   refresh_->setText(busy ? "刷新中…" : "刷新");
   updateControls();
 }
-void Window::showError(const QString &message) {
+
+void Window::showError(const QString& message) {
   error_->setText(message);
   error_->setVisible(!message.isEmpty());
 }
-void Window::setPreview(QImage image) { preview_->present(std::move(image)); }
-void Window::present(const Snapshot &s) {
+
+void Window::setPreview(QImage image) {
+  preview_->present(std::move(image));
+}
+
+void Window::present(const Snapshot& s) {
   busy_ = !s.finished;
   const std::map<std::string, QString> labels{
       {"idle", "准备投屏"},        {"permission", "正在检查屏幕录制权限…"},
@@ -366,6 +377,7 @@ void Window::present(const Snapshot &s) {
   if (s.state == "stopping")
     stop_->setEnabled(false);
 }
+
 void Window::updateControls() {
   const bool editable = !busy_ && !closing_;
   start_->setVisible(!busy_);
@@ -375,16 +387,16 @@ void Window::updateControls() {
   displays_->setEnabled(editable && !enumerating_);
   refresh_->setEnabled(editable && !enumerating_);
   save_->setEnabled(editable && validServer(server()));
-  start_->setEnabled(editable && !enumerating_ && validCode(code()) &&
-                     validServer(server()) && displays_->currentRow() >= 0);
+  start_->setEnabled(editable && !enumerating_ && validCode(code()) && validServer(server()) &&
+                     displays_->currentRow() >= 0);
   stop_->setEnabled(busy_ && !closing_);
   if (!validServer(server()))
-    serverHint_->setText(
-        "请输入有效的 HTTP 或 HTTPS 服务器地址，不含账号、查询参数或片段。");
+    serverHint_->setText("请输入有效的 HTTP 或 HTTPS 服务器地址，不含账号、查询参数或片段。");
   else if (serverHint_->text() != "设置已保存")
     serverHint_->clear();
 }
-void Window::closeEvent(QCloseEvent *e) {
+
+void Window::closeEvent(QCloseEvent* e) {
   if (allowClose_) {
     QSettings().setValue("size", size());
     e->accept();
@@ -398,8 +410,9 @@ void Window::closeEvent(QCloseEvent *e) {
     emit closeRequested();
   }
 }
+
 void Window::finishClose() {
   allowClose_ = true;
   close();
 }
-} // namespace screen_cast
+}  // namespace screen_cast

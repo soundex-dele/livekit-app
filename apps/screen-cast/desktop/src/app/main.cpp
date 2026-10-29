@@ -6,7 +6,8 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <iostream>
-int main(int argc, char **argv) {
+
+int main(int argc, char** argv) {
   QApplication app(argc, argv);
   app.setOrganizationName("AVPlatform");
   app.setApplicationName("ScreenCast");
@@ -16,8 +17,7 @@ int main(int argc, char **argv) {
   const bool check = app.arguments().contains("--check-runtime");
   if (check) {
     QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       temporarySettings.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporarySettings.path());
   }
   screen_cast::Window window;
   if (check) {

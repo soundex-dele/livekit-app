@@ -4,6 +4,7 @@
 #include <future>
 #include <stdexcept>
 using namespace std::chrono_literals;
+
 namespace remote_app {
 void ControlProtocol::push(sdk::Json e) {
   if (e.at("type") == "move") {
@@ -15,6 +16,7 @@ void ControlProtocol::push(sdk::Json e) {
     throw std::runtime_error("控制消息积压，连接已停止");
   queue.push_back(std::move(e));
 }
+
 void ControlProtocol::flush_move() {
   if (move) {
     if (queue.size() >= 256)
@@ -23,6 +25,7 @@ void ControlProtocol::flush_move() {
     move.reset();
   }
 }
+
 sdk::Json ControlProtocol::next() {
   auto e = std::move(queue.front());
   queue.pop_front();
@@ -34,41 +37,35 @@ sdk::Json ControlProtocol::next() {
     throw std::runtime_error("控制序号耗尽");
   return e;
 }
-bool ControlProtocol::receive(const std::vector<uint8_t> &bytes,
-                              const sdk::DataReceiveParams &p) {
+
+bool ControlProtocol::receive(const std::vector<uint8_t>& bytes, const sdk::DataReceiveParams& p) {
   if (!p.reliable || p.topic != sdk::remote_control_topic ||
-      p.sender_identity != grant.value("host_identity", "") ||
-      bytes.size() > 4096)
+      p.sender_identity != grant.value("host_identity", "") || bytes.size() > 4096)
     return false;
   sdk::Json v;
   try {
     v = sdk::Json::parse(bytes);
-    if (v.at("v") != 1 || v.at("type") != "layout" ||
-        v.at("grant_id") != grant.at("grant_id") ||
+    if (v.at("v") != 1 || v.at("type") != "layout" || v.at("grant_id") != grant.at("grant_id") ||
         v.at("epoch") != grant.at("epoch"))
       return false;
-    if (!v.at("layout_version").is_number_unsigned() ||
-        v.at("layout_version") == 0 ||
-        v.at("layout_version") > 9007199254740991ULL ||
-        !v.at("width").is_number_integer() ||
-        !v.at("height").is_number_integer() || v.at("width") < 1 ||
-        v.at("width") > 32768 || v.at("height") < 1 || v.at("height") > 32768 ||
-        !v.at("active").is_boolean())
+    if (!v.at("layout_version").is_number_unsigned() || v.at("layout_version") == 0 ||
+        v.at("layout_version") > 9007199254740991ULL || !v.at("width").is_number_integer() ||
+        !v.at("height").is_number_integer() || v.at("width") < 1 || v.at("width") > 32768 ||
+        v.at("height") < 1 || v.at("height") > 32768 || !v.at("active").is_boolean())
       return false;
-    if (!layout.is_null() &&
-        v.at("layout_version") < layout.at("layout_version"))
+    if (!layout.is_null() && v.at("layout_version") < layout.at("layout_version"))
       return false;
     if (v.contains("text_input") && !v["text_input"].is_boolean())
       return false;
-  } catch (const sdk::Json::exception &) {
+  } catch (const sdk::Json::exception&) {
     return false;
   }
   if (!v.at("active").get<bool>())
     throw std::runtime_error("被控端已停止控制");
   if (pending && v.contains("text_result")) {
     auto r = v["text_result"];
-    if (r.is_object() && r.value("id", uint64_t(0)) == pending &&
-        r.contains("accepted") && r["accepted"].is_boolean()) {
+    if (r.is_object() && r.value("id", uint64_t(0)) == pending && r.contains("accepted") &&
+        r["accepted"].is_boolean()) {
       if (r["accepted"].get<bool>()) {
         accepted = pending;
         text_status = "已送入远端输入系统，请观察目标应用";
@@ -77,8 +74,7 @@ bool ControlProtocol::receive(const std::vector<uint8_t> &bytes,
       pending = 0;
     }
   }
-  bool changed =
-      layout.is_null() || v.at("layout_version") != layout.at("layout_version");
+  bool changed = layout.is_null() || v.at("layout_version") != layout.at("layout_version");
   if (changed) {
     queue.clear();
     move.reset();
@@ -89,8 +85,8 @@ bool ControlProtocol::receive(const std::vector<uint8_t> &bytes,
   layout = std::move(v);
   return true;
 }
-void ControlProtocol::text(std::string value,
-                           sdk::ControlClock::time_point now) {
+
+void ControlProtocol::text(std::string value, sdk::ControlClock::time_point now) {
   if (pending)
     throw std::runtime_error("请等待上一条文字确认");
   if (layout.is_null() || !layout.value("text_input", false))
@@ -104,8 +100,7 @@ void ControlProtocol::text(std::string value,
   if (scalars.empty() || scalars.size() > 256)
     throw std::runtime_error("每次发送 1–256 个字符");
   for (auto c : scalars)
-    if ((c >= 0xd800 && c <= 0xdfff) || (c < 32 && c != 9 && c != 10) ||
-        (c >= 127 && c <= 159))
+    if ((c >= 0xd800 && c <= 0xdfff) || (c < 32 && c != 9 && c != 10) || (c >= 127 && c <= 159))
       throw std::runtime_error("文字中包含不支持的控制字符");
   push({{"type", "release"}});
   pending = ++text_id;
@@ -116,11 +111,12 @@ void ControlProtocol::text(std::string value,
         {"text_id", pending},
         {"text", q.toUtf8().toStdString()}});
 }
+
 void ControlProtocol::tick(sdk::ControlClock::time_point now) {
   if (pending && now >= text_deadline)
-    throw std::runtime_error(
-        "文字发送结果不确定，请检查远端内容，不要直接重发");
+    throw std::runtime_error("文字发送结果不确定，请检查远端内容，不要直接重发");
 }
+
 void ControlProtocol::finish() {
   queue.clear();
   move.reset();
@@ -129,10 +125,11 @@ void ControlProtocol::finish() {
     text_status = "文字发送结果不确定，请检查远端内容，不要直接重发";
   pending = 0;
 }
-QImage convert_frame(const sdk::VideoFrame &f) {
+
+QImage convert_frame(const sdk::VideoFrame& f) {
   if (f.width < 1 || f.height < 1 || f.width > 8192 || f.height > 8192)
     throw std::runtime_error("视频尺寸无效");
-  auto valid = [](const auto &p, int stride, int w, int h) {
+  auto valid = [](const auto& p, int stride, int w, int h) {
     return stride >= w && p.size() >= size_t(stride) * h;
   };
   if (!valid(f.y, f.stride_y, f.width, f.height) ||
@@ -144,23 +141,25 @@ QImage convert_frame(const sdk::VideoFrame &f) {
     throw std::runtime_error("无法分配画面缓冲");
   auto clip = [](int n) { return std::clamp(n, 0, 255); };
   for (int y = 0; y < f.height; ++y) {
-    auto row = reinterpret_cast<QRgb *>(image.scanLine(y));
+    auto row = reinterpret_cast<QRgb*>(image.scanLine(y));
     for (int x = 0; x < f.width; ++x) {
       int a = std::max(0, int(f.y[y * f.stride_y + x]) - 16),
           u = int(f.u[y / 2 * f.stride_u + x / 2]) - 128,
           v = int(f.v[y / 2 * f.stride_v + x / 2]) - 128;
-      row[x] = qRgb(clip((298 * a + 409 * v + 128) >> 8),
-                    clip((298 * a - 100 * u - 208 * v + 128) >> 8),
-                    clip((298 * a + 516 * u + 128) >> 8));
+      row[x] =
+          qRgb(clip((298 * a + 409 * v + 128) >> 8), clip((298 * a - 100 * u - 208 * v + 128) >> 8),
+               clip((298 * a + 516 * u + 128) >> 8));
     }
   }
   return image;
 }
+
 Controller::~Controller() {
   stop();
   if (worker_.joinable())
     worker_.join();
 }
+
 ControllerSnapshot Controller::snapshot() const {
   std::lock_guard lock(mutex_);
   auto s = snapshot_;
@@ -179,6 +178,7 @@ ControllerSnapshot Controller::snapshot() const {
   }
   return s;
 }
+
 void Controller::start(std::string url, std::string code, std::string name) {
   if (!snapshot().finished)
     return;
@@ -196,28 +196,30 @@ void Controller::start(std::string url, std::string code, std::string name) {
   }
   worker_ = std::thread([this, url, code, name] { run(url, code, name); });
 }
+
 void Controller::stop() {
   stop_ = true;
-
 }
+
 void Controller::fail(std::string error) {
   std::lock_guard lock(mutex_);
   if (snapshot_.error.empty())
     snapshot_.error = std::move(error);
   stop_ = true;
 }
+
 void Controller::input(sdk::Json event) {
   try {
     std::lock_guard lock(mutex_);
-    if (stop_ || snapshot_.finished || protocol_.layout.is_null() ||
-        protocol_.pending)
+    if (stop_ || snapshot_.finished || protocol_.layout.is_null() || protocol_.pending)
       return;
     event["layout_version"] = protocol_.layout.at("layout_version");
     protocol_.push(std::move(event));
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     fail(e.what());
   }
 }
+
 void Controller::release() {
   try {
     std::lock_guard lock(mutex_);
@@ -225,10 +227,11 @@ void Controller::release() {
       return;
     protocol_.move.reset();
     protocol_.push({{"type", "release"}});
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     fail(e.what());
   }
 }
+
 void Controller::send_text(std::string text) {
   std::lock_guard lock(mutex_);
   if (protocol_.queue.size() >= 254) {
@@ -240,12 +243,12 @@ void Controller::send_text(std::string text) {
     throw std::runtime_error("连接已结束");
   protocol_.text(std::move(text));
 }
+
 void Controller::run(std::string url, std::string code, std::string name) {
   std::string id, credential;
   try {
     sdk::Json body = {{"code", code}, {"name", name}};
-    auto grant =
-        request(url, "/api/v1/remote-control/pairings/redeem", "", &body);
+    auto grant = request(url, "/api/v1/remote-control/pairings/redeem", "", &body);
     id = grant.at("id");
     credential = grant.at("credential");
     {
@@ -257,8 +260,7 @@ void Controller::run(std::string url, std::string code, std::string name) {
     auto next = sdk::ControlClock::now();
     while (!stop_) {
       if (sdk::ControlClock::now() >= next) {
-        grant = request(url, "/api/v1/remote-control/control-grants/" + id,
-                        credential);
+        grant = request(url, "/api/v1/remote-control/control-grants/" + id, credential);
         if (stop_)
           break;
         auto state = grant.at("state").get<std::string>();
@@ -268,16 +270,14 @@ void Controller::run(std::string url, std::string code, std::string name) {
             std::lock_guard lock(mutex_);
             snapshot_.state = "connecting";
           }
-          rtc_ = std::thread([this, url, grant, credential] {
-            media(url, grant, credential);
-          });
+          rtc_ = std::thread([this, url, grant, credential] { media(url, grant, credential); });
         } else if (state != "pending" && state != "approved")
           throw std::runtime_error("申请已结束：" + state);
         next = sdk::ControlClock::now() + 500ms;
       }
       std::this_thread::sleep_for(20ms);
     }
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     fail(e.what());
   }
   stop_ = true;
@@ -287,9 +287,8 @@ void Controller::run(std::string url, std::string code, std::string name) {
   if (!id.empty())
     try {
       sdk::Json empty = sdk::Json::object();
-      request(url, "/api/v1/remote-control/control-grants/" + id + "/revoke",
-              credential, &empty);
-    } catch (const std::exception &e) {
+      request(url, "/api/v1/remote-control/control-grants/" + id + "/revoke", credential, &empty);
+    } catch (const std::exception& e) {
       fail(e.what());
     }
   {
@@ -301,31 +300,33 @@ void Controller::run(std::string url, std::string code, std::string name) {
     snapshot_.finished = true;
   }
 }
-void Controller::media(std::string url, sdk::Json grant,
-                       std::string credential) {
+
+void Controller::media(std::string url, sdk::Json grant, std::string credential) {
   std::unique_ptr<RtcConnection> connection;
   try {
     sdk::Json empty = sdk::Json::object();
-    auto connect = request(url,
-                           "/api/v1/remote-control/control-grants/" +
-                               grant.at("id").get<std::string>() + "/connect",
-                           credential, &empty);
+    auto connect = request(
+        url,
+        "/api/v1/remote-control/control-grants/" + grant.at("id").get<std::string>() + "/connect",
+        credential, &empty);
     if (stop_)
       return;
     connection = std::make_unique<RtcConnection>(connect.at("media_url"), connect.at("media_token"),
-        grant.at("host_identity"), true, stop_);
-    auto next = sdk::ControlClock::now(), move_at = next,
-         layout_deadline = next + 10s;
+                                                 grant.at("host_identity"), true, stop_);
+    auto next = sdk::ControlClock::now(), move_at = next, layout_deadline = next + 10s;
+
     struct Send {
       std::future<void> future;
       sdk::ControlClock::time_point deadline;
     };
+
     std::optional<Send> sending;
     while (!stop_) {
       connection->poll();
       for (const auto& packet : connection->take_data()) {
         std::lock_guard lock(mutex_);
-        if (!stop_ && protocol_.receive(packet.bytes, packet.source)) snapshot_.state = "connected";
+        if (!stop_ && protocol_.receive(packet.bytes, packet.source))
+          snapshot_.state = "connected";
       }
       const auto now = sdk::ControlClock::now();
       std::optional<sdk::Json> packet;
@@ -354,14 +355,15 @@ void Controller::media(std::string url, sdk::Json grant,
       }
       if (packet) {
         auto raw = packet->dump();
-        sending = Send{
-            connection->send({raw.begin(), raw.end()}),
-            now + 2s};
+        sending = Send{connection->send({raw.begin(), raw.end()}), now + 2s};
       }
       if (auto frame = connection->take_frame()) {
         auto image = convert_frame(*frame);
         std::lock_guard lock(mutex_);
-        if (!stop_) { snapshot_.image = std::move(image); ++snapshot_.frames; }
+        if (!stop_) {
+          snapshot_.image = std::move(image);
+          ++snapshot_.frames;
+        }
       }
       std::this_thread::sleep_for(5ms);
     }
@@ -377,18 +379,18 @@ void Controller::media(std::string url, sdk::Json grant,
       auto sent = connection->send({raw.begin(), raw.end()});
       sent.wait_for(200ms);
     }
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     if (!stop_)
       fail(e.what());
   }
   if (connection) {
     try {
       connection->close();
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       if (!stop_)
         fail(e.what());
     }
   }
   stop_ = true;
 }
-} // namespace remote_app
+}  // namespace remote_app

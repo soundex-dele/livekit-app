@@ -6,37 +6,37 @@
 #include <map>
 #include <mutex>
 #include <thread>
+
 namespace meeting {
-QImage convert_frame(const livekit::sdk::VideoFrame &frame,
-                     QSize limit = {1280, 720});
+QImage convert_frame(const livekit::sdk::VideoFrame& frame, QSize limit = {1280, 720});
 QRect fit_video(QRect bounds, QSize source);
+
 class VideoWidget : public QWidget {
-public:
-  explicit VideoWidget(QWidget *parent = nullptr);
-  void present(QImage image, QString name, QString status,
-               bool speaker = false);
+ public:
+  explicit VideoWidget(QWidget* parent = nullptr);
+  void present(QImage image, QString name, QString status, bool speaker = false);
 
-protected:
-  void paintEvent(QPaintEvent *) override;
+ protected:
+  void paintEvent(QPaintEvent*) override;
 
-private:
+ private:
   QImage image_;
   QString name_, status_;
   bool speaker_ = false;
 };
+
 // The GUI replaces the pending batch. The worker never queues a Qt event per
 // frame.
 class FrameConverter {
-public:
-  using Frames =
-      std::map<std::string, std::shared_ptr<const livekit::sdk::VideoFrame>>;
+ public:
+  using Frames = std::map<std::string, std::shared_ptr<const livekit::sdk::VideoFrame>>;
   FrameConverter();
   ~FrameConverter();
   void submit(Frames frames, QSize limit);
   std::map<std::string, QImage> images();
   void clear();
 
-private:
+ private:
   std::mutex mutex_;
   std::condition_variable cv_;
   Frames pending_, last_;
@@ -46,4 +46,4 @@ private:
   uint64_t epoch_ = 0;
   std::thread worker_;
 };
-} // namespace meeting
+}  // namespace meeting

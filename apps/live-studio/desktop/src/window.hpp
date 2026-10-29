@@ -14,12 +14,14 @@ class Preview final : public QWidget {
   QRectF canvasRect() const;
   std::function<void(int)> selectSource;
   std::function<void(float, float, bool)> moveSource;
+
  protected:
   void paintEvent(QPaintEvent*) override;
   void mousePressEvent(QMouseEvent*) override;
   void mouseMoveEvent(QMouseEvent*) override;
   void mouseReleaseEvent(QMouseEvent*) override;
   void keyPressEvent(QKeyEvent*) override;
+
  private:
   std::shared_ptr<const sdk::StudioImage> frame_;
   sdk::StudioScene scene_;
@@ -33,18 +35,22 @@ struct WindowOptions {
   bool offline = false;
   bool portrait = false;
 };
+
 class Window final : public QMainWindow {
  public:
   explicit Window(WindowOptions options, QWidget* parent = nullptr);
   ~Window() override;
   sdk::StudioSnapshot mediaSnapshot() const;
   bool saveProject();
+
  protected:
   void closeEvent(QCloseEvent*) override;
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
+
 void applyTheme();
 void configureOffscreenPlatform();
-}
+}  // namespace studio_app

@@ -2,6 +2,7 @@
 #include <QPainter>
 #include <algorithm>
 #include <stdexcept>
+
 namespace meeting {
 QRect fit_video(QRect b, QSize s) {
   if (s.isEmpty())
@@ -9,10 +10,11 @@ QRect fit_video(QRect b, QSize s) {
   auto size = s.scaled(b.size(), Qt::KeepAspectRatio);
   return {b.center() - QPoint(size.width() / 2, size.height() / 2), size};
 }
-QImage convert_frame(const livekit::sdk::VideoFrame &f, QSize limit) {
+
+QImage convert_frame(const livekit::sdk::VideoFrame& f, QSize limit) {
   if (f.width <= 0 || f.height <= 0 || f.width > 16384 || f.height > 16384)
     throw std::invalid_argument("Invalid I420 dimensions");
-  auto valid = [](const auto &p, int stride, int w, int h) {
+  auto valid = [](const auto& p, int stride, int w, int h) {
     return stride >= w && p.size() >= size_t(stride) * h;
   };
   if (!valid(f.y, f.stride_y, f.width, f.height) ||
@@ -27,28 +29,29 @@ QImage convert_frame(const livekit::sdk::VideoFrame &f, QSize limit) {
     throw std::runtime_error("Cannot allocate video image");
   auto clip = [](int v) { return std::clamp(v, 0, 255); };
   for (int y = 0; y < size.height(); ++y) {
-    auto *row = reinterpret_cast<QRgb *>(out.scanLine(y));
+    auto* row = reinterpret_cast<QRgb*>(out.scanLine(y));
     int sy = int(int64_t(y) * f.height / size.height());
     for (int x = 0; x < size.width(); ++x) {
       int sx = int(int64_t(x) * f.width / size.width());
       int Y = std::max(0, int(f.y[sy * f.stride_y + sx]) - 16),
           U = int(f.u[(sy / 2) * f.stride_u + sx / 2]) - 128,
           V = int(f.v[(sy / 2) * f.stride_v + sx / 2]) - 128;
-      row[x] = qRgb(clip((298 * Y + 409 * V + 128) >> 8),
-                    clip((298 * Y - 100 * U - 208 * V + 128) >> 8),
-                    clip((298 * Y + 516 * U + 128) >> 8));
+      row[x] =
+          qRgb(clip((298 * Y + 409 * V + 128) >> 8), clip((298 * Y - 100 * U - 208 * V + 128) >> 8),
+               clip((298 * Y + 516 * U + 128) >> 8));
     }
   }
   return out;
 }
-VideoWidget::VideoWidget(QWidget *p) : QWidget(p) {
+
+VideoWidget::VideoWidget(QWidget* p) : QWidget(p) {
   setObjectName("videoTile");
   setMinimumSize(120, 90);
   setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   setAccessibleName("参会者画面");
 }
-void VideoWidget::present(QImage image, QString name, QString status,
-                          bool speaker) {
+
+void VideoWidget::present(QImage image, QString name, QString status, bool speaker) {
   image_ = std::move(image);
   name_ = std::move(name);
   status_ = std::move(status);
@@ -56,7 +59,8 @@ void VideoWidget::present(QImage image, QString name, QString status,
   setAccessibleName(name_ + " " + status_);
   update();
 }
-void VideoWidget::paintEvent(QPaintEvent *) {
+
+void VideoWidget::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing);
   p.fillRect(rect(), QColor("#222833"));
@@ -78,8 +82,7 @@ void VideoWidget::paintEvent(QPaintEvent *) {
     font.setPixelSize(12);
     p.setFont(font);
     p.setPen(QColor("#c6cfdd"));
-    p.drawText(QRect(4, avatar.bottom() + 6, width() - 8, 18), Qt::AlignCenter,
-               status_);
+    p.drawText(QRect(4, avatar.bottom() + 6, width() - 8, 18), Qt::AlignCenter, status_);
   }
   p.fillRect(0, height() - 30, width(), 30, QColor(15, 19, 26, 210));
   p.setPen(Qt::white);
@@ -94,6 +97,7 @@ void VideoWidget::paintEvent(QPaintEvent *) {
     p.drawRect(rect().adjusted(1, 1, -1, -1));
   }
 }
+
 FrameConverter::FrameConverter()
     : worker_([this] {
         for (;;) {
@@ -111,12 +115,12 @@ FrameConverter::FrameConverter()
             dirty_ = false;
           }
           std::map<std::string, QImage> result;
-          for (auto &[id, frame] : next) {
+          for (auto& [id, frame] : next) {
             if (!frame)
               continue;
             try {
               result[id] = convert_frame(*frame, size);
-            } catch (const std::exception &) {
+            } catch (const std::exception&) {
             }
           }
           {
@@ -126,6 +130,7 @@ FrameConverter::FrameConverter()
           }
         }
       }) {}
+
 FrameConverter::~FrameConverter() {
   {
     std::lock_guard lock(mutex_);
@@ -134,6 +139,7 @@ FrameConverter::~FrameConverter() {
   cv_.notify_one();
   worker_.join();
 }
+
 void FrameConverter::submit(Frames f, QSize size) {
   std::lock_guard lock(mutex_);
   if (f == last_ && size == limit_)
@@ -144,10 +150,12 @@ void FrameConverter::submit(Frames f, QSize size) {
   dirty_ = true;
   cv_.notify_one();
 }
+
 std::map<std::string, QImage> FrameConverter::images() {
   std::lock_guard lock(mutex_);
   return ready_;
 }
+
 void FrameConverter::clear() {
   std::lock_guard lock(mutex_);
   ++epoch_;
@@ -156,4 +164,4 @@ void FrameConverter::clear() {
   ready_.clear();
   dirty_ = false;
 }
-} // namespace meeting
+}  // namespace meeting

@@ -3,6 +3,7 @@
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <Security/Security.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
 namespace studio_app::platform {
 std::filesystem::path default_settings() {
   @autoreleasepool {
@@ -13,14 +14,15 @@ std::filesystem::path default_settings() {
     return std::filesystem::path(paths.firstObject.UTF8String) / "AVPlatform" / "LiveStudio";
   }
 }
+
 std::string browse(bool save) {
   @autoreleasepool {
-    NSSavePanel *panel = save ? [NSSavePanel savePanel] : [NSOpenPanel openPanel];
+    NSSavePanel* panel = save ? [NSSavePanel savePanel] : [NSOpenPanel openPanel];
     if (save) {
       panel.allowedContentTypes = @[ UTTypeMPEG4Movie ];
       panel.nameFieldStringValue = @"直播录制.mp4";
     } else {
-      NSOpenPanel *open = (NSOpenPanel *)panel;
+      NSOpenPanel* open = (NSOpenPanel*)panel;
       open.canChooseDirectories = NO;
       open.allowsMultipleSelection = NO;
       open.allowedContentTypes = @[ UTTypeImage, UTTypeMovie ];
@@ -30,7 +32,8 @@ std::string browse(bool save) {
     return panel.URL.path.UTF8String;
   }
 }
-static NSMutableDictionary *query(const std::filesystem::path &path) {
+
+static NSMutableDictionary* query(const std::filesystem::path& path) {
   auto account = std::filesystem::absolute(path).lexically_normal().string();
   return [@{
     (__bridge id)kSecClass : (__bridge id)kSecClassGenericPassword,
@@ -38,11 +41,13 @@ static NSMutableDictionary *query(const std::filesystem::path &path) {
     (__bridge id)kSecAttrAccount : [NSString stringWithUTF8String:account.c_str()]
   } mutableCopy];
 }
+
 static void require(OSStatus status) {
   if (status != errSecSuccess)
     throw std::runtime_error("钥匙串访问失败：" + std::to_string(status));
 }
-nlohmann::json load_account(const std::filesystem::path &path) {
+
+nlohmann::json load_account(const std::filesystem::path& path) {
   @autoreleasepool {
     auto item = query(path);
     item[(__bridge id)kSecReturnData] = @YES;
@@ -56,14 +61,15 @@ nlohmann::json load_account(const std::filesystem::path &path) {
     if (status == errSecItemNotFound)
       return nullptr;
     require(status);
-    NSData *bytes = CFBridgingRelease(result);
+    NSData* bytes = CFBridgingRelease(result);
     if (bytes.length > 16384)
       throw std::runtime_error("账号配置过大");
-    auto *data = static_cast<const char *>(bytes.bytes);
+    auto* data = static_cast<const char*>(bytes.bytes);
     return nlohmann::json::parse(data, data + bytes.length);
   }
 }
-void save_account(const std::filesystem::path &path, const nlohmann::json &account) {
+
+void save_account(const std::filesystem::path& path, const nlohmann::json& account) {
   @autoreleasepool {
     auto item = query(path);
     if (account.value("token", "").empty()) {
@@ -73,7 +79,7 @@ void save_account(const std::filesystem::path &path, const nlohmann::json &accou
       return;
     }
     auto text = account.dump();
-    NSData *bytes = [NSData dataWithBytes:text.data() length:text.size()];
+    NSData* bytes = [NSData dataWithBytes:text.data() length:text.size()];
     auto updates = @{(__bridge id)kSecValueData : bytes};
     auto status = SecItemUpdate((__bridge CFDictionaryRef)item, (__bridge CFDictionaryRef)updates);
     if (status == errSecItemNotFound) {
@@ -85,4 +91,4 @@ void save_account(const std::filesystem::path &path, const nlohmann::json &accou
     require(status);
   }
 }
-} // namespace studio_app::platform
+}  // namespace studio_app::platform

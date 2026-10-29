@@ -2,13 +2,16 @@
 #include <QCoreApplication>
 #include <iostream>
 using namespace std::chrono_literals;
+
 namespace {
 struct Sink : livekit::sdk::ControlInputSink {
-  bool apply(const livekit::sdk::ControlInput &) noexcept override {
+  bool apply(const livekit::sdk::ControlInput&) noexcept override {
     std::terminate();
   }
 };
-template <class Session> void cancel_and_wait(Session &s) {
+
+template <class Session>
+void cancel_and_wait(Session& s) {
   std::this_thread::sleep_for(30ms);
   s.stop();
   auto deadline = std::chrono::steady_clock::now() + 5s;
@@ -19,8 +22,9 @@ template <class Session> void cancel_and_wait(Session &s) {
   if (!s.snapshot().error.empty())
     throw std::runtime_error(s.snapshot().error);
 }
-} // namespace
-int main(int argc, char **argv) {
+}  // namespace
+
+int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);
   if (argc != 2)
     return 2;
@@ -35,10 +39,9 @@ int main(int argc, char **argv) {
     cancel_and_wait(controller);
     controller.start(argv[1], "0123456789", "retry");
     cancel_and_wait(controller);
-    std::cout
-        << "Cancelled grants revoked, no stale media start, session reusable\n";
+    std::cout << "Cancelled grants revoked, no stale media start, session reusable\n";
     return 0;
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;
   }

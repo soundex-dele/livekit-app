@@ -13,28 +13,46 @@ class QListView;
 class QSlider;
 class QSplitter;
 class QMenu;
+
 namespace player_demo {
 class PlayerWindow final : public QMainWindow {
   Q_OBJECT
  public:
   explicit PlayerWindow(const QString& settingsFile = {}, bool automation = false,
                         std::unique_ptr<AudioOutput> audio = {}, QWidget* parent = nullptr);
-  Controller& controller() { return controller_; }
-  PlaylistModel& playlist() { return playlist_; }
-  Settings& settings() { return settings_; }
+
+  Controller& controller() {
+    return controller_;
+  }
+
+  PlaylistModel& playlist() {
+    return playlist_;
+  }
+
+  Settings& settings() {
+    return settings_;
+  }
+
   void openFiles(const QStringList& paths, bool append = false);
   void playRow(int row, bool automatic = false);
   void toggleFullscreen();
   void saveState();
   bool saveScreenshot(const QString& path);
-  void setAutoAdvance(bool value) { autoAdvance_ = value; }
+
+  void setAutoAdvance(bool value) {
+    autoAdvance_ = value;
+  }
+
  signals:
   void shutdownComplete();
+
  protected:
   void closeEvent(QCloseEvent*) override;
   bool eventFilter(QObject*, QEvent*) override;
+
  private:
-  QAction* action(const char* name, const QString& text, const QString& icon = {}, const QKeySequence& shortcut = {});
+  QAction* action(const char* name, const QString& text, const QString& icon = {},
+                  const QKeySequence& shortcut = {});
   void buildUi();
   void refresh();
   void browse(bool append);
@@ -73,4 +91,4 @@ class PlayerWindow final : public QMainWindow {
   QElapsedTimer idle_;
   QTimer idleTimer_, historyTimer_;
 };
-}
+}  // namespace player_demo

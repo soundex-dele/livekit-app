@@ -1,6 +1,7 @@
 #include "features/remote_control/ui.hpp"
 #include <QApplication>
-int main(int argc, char **argv) {
+
+int main(int argc, char** argv) {
   QApplication app(argc, argv);
   QCoreApplication::setOrganizationName("AVPlatform");
   QCoreApplication::setApplicationName("RemoteControl");

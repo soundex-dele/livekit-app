@@ -1,12 +1,12 @@
 #include "services/controller.hpp"
 #include <algorithm>
 #include <stdexcept>
+
 namespace screen_cast {
-QImage convertFrame(const livekit::sdk::VideoFrame &f, QSize limit) {
-  if (f.width <= 0 || f.height <= 0 || f.width > 16384 || f.height > 16384 ||
-      limit.isEmpty())
+QImage convertFrame(const livekit::sdk::VideoFrame& f, QSize limit) {
+  if (f.width <= 0 || f.height <= 0 || f.width > 16384 || f.height > 16384 || limit.isEmpty())
     throw std::invalid_argument("Invalid I420 dimensions");
-  auto valid = [](const auto &p, int stride, int w, int h) {
+  auto valid = [](const auto& p, int stride, int w, int h) {
     return stride >= w && p.size() >= size_t(stride) * h;
   };
   if (!valid(f.y, f.stride_y, f.width, f.height) ||
@@ -21,20 +21,21 @@ QImage convertFrame(const livekit::sdk::VideoFrame &f, QSize limit) {
     throw std::runtime_error("Cannot allocate preview");
   auto clip = [](int v) { return std::clamp(v, 0, 255); };
   for (int y = 0; y < size.height(); ++y) {
-    auto *row = reinterpret_cast<QRgb *>(out.scanLine(y));
+    auto* row = reinterpret_cast<QRgb*>(out.scanLine(y));
     int sy = int(int64_t(y) * f.height / size.height());
     for (int x = 0; x < size.width(); ++x) {
       int sx = int(int64_t(x) * f.width / size.width());
       int Y = std::max(0, int(f.y[sy * f.stride_y + sx]) - 16),
           U = int(f.u[(sy / 2) * f.stride_u + sx / 2]) - 128,
           V = int(f.v[(sy / 2) * f.stride_v + sx / 2]) - 128;
-      row[x] = qRgb(clip((298 * Y + 409 * V + 128) >> 8),
-                    clip((298 * Y - 100 * U - 208 * V + 128) >> 8),
-                    clip((298 * Y + 516 * U + 128) >> 8));
+      row[x] =
+          qRgb(clip((298 * Y + 409 * V + 128) >> 8), clip((298 * Y - 100 * U - 208 * V + 128) >> 8),
+               clip((298 * Y + 516 * U + 128) >> 8));
     }
   }
   return out;
 }
+
 FrameConverter::FrameConverter()
     : worker_([this] {
         for (;;) {
@@ -55,7 +56,7 @@ FrameConverter::FrameConverter()
           try {
             if (frame)
               result = convertFrame(*frame, limit);
-          } catch (const std::exception &) {
+          } catch (const std::exception&) {
           }
           {
             std::lock_guard lock(mutex_);
@@ -64,6 +65,7 @@ FrameConverter::FrameConverter()
           }
         }
       }) {}
+
 FrameConverter::~FrameConverter() {
   {
     std::lock_guard lock(mutex_);
@@ -72,8 +74,8 @@ FrameConverter::~FrameConverter() {
   cv_.notify_one();
   worker_.join();
 }
-void FrameConverter::submit(
-    std::shared_ptr<const livekit::sdk::VideoFrame> frame, QSize limit) {
+
+void FrameConverter::submit(std::shared_ptr<const livekit::sdk::VideoFrame> frame, QSize limit) {
   std::lock_guard lock(mutex_);
   if (frame == last_ && limit == limit_)
     return;
@@ -83,10 +85,12 @@ void FrameConverter::submit(
   dirty_ = true;
   cv_.notify_one();
 }
+
 QImage FrameConverter::image() {
   std::lock_guard lock(mutex_);
   return ready_;
 }
+
 void FrameConverter::clear() {
   std::lock_guard lock(mutex_);
   ++epoch_;
@@ -95,7 +99,8 @@ void FrameConverter::clear() {
   ready_ = {};
   dirty_ = false;
 }
-Controller::Controller(Window &w, std::unique_ptr<Backend> b)
+
+Controller::Controller(Window& w, std::unique_ptr<Backend> b)
     : QObject(&w), window_(w), backend_(std::move(b)) {
   connect(&w, &Window::refreshRequested, this, [this] { refresh(); });
   connect(&w, &Window::startRequested, this, [this] {
@@ -105,9 +110,9 @@ Controller::Controller(Window &w, std::unique_ptr<Backend> b)
     lastState_.clear();
     stopping_ = false;
     try {
-      backend_->start(window_.server().toStdString(),
-                      window_.code().toStdString(), window_.selectedDevice());
-    } catch (const std::exception &e) {
+      backend_->start(window_.server().toStdString(), window_.code().toStdString(),
+                      window_.selectedDevice());
+    } catch (const std::exception& e) {
       const auto state = backend_->snapshot();
       lastState_ = state.state;
       lastError_ = state.error;
@@ -132,39 +137,39 @@ Controller::Controller(Window &w, std::unique_ptr<Backend> b)
   lastState_ = backend_->snapshot().state;
   refresh();
 }
+
 Controller::~Controller() {
   timer_.stop();
   backend_->stop();
   if (devices_.valid())
     devices_.wait();
 }
+
 void Controller::refresh() {
   if (devices_.valid() || closing_ || !backend_->snapshot().finished)
     return;
   window_.showError({});
   window_.setEnumerating(true);
   try {
-    devices_ =
-        std::async(std::launch::async, [this] { return backend_->devices(); });
-  } catch (const std::exception &e) {
+    devices_ = std::async(std::launch::async, [this] { return backend_->devices(); });
+  } catch (const std::exception& e) {
     window_.setEnumerating(false);
     window_.showError(readableError(e.what()));
   }
 }
+
 void Controller::tick() {
-  if (devices_.valid() &&
-      devices_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+  if (devices_.valid() && devices_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
     try {
       window_.setDevices(devices_.get());
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       window_.setDevices({});
       window_.showError(readableError(e.what()));
     }
     window_.setEnumerating(false);
   }
   auto s = backend_->snapshot();
-  if (s.state != lastState_ || s.error != lastError_ ||
-      s.finished != lastFinished_) {
+  if (s.state != lastState_ || s.error != lastError_ || s.finished != lastFinished_) {
     lastState_ = s.state;
     lastError_ = s.error;
     lastFinished_ = s.finished;
@@ -182,4 +187,4 @@ void Controller::tick() {
     window_.finishClose();
   }
 }
-} // namespace screen_cast
+}  // namespace screen_cast

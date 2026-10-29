@@ -5,12 +5,15 @@
 #include <iostream>
 #include <stdexcept>
 using namespace remote_app;
+
 namespace {
-void check(bool value, const char *message) {
+void check(bool value, const char* message) {
   if (!value)
     throw std::runtime_error(message);
 }
-template <class F> void rejected(F &&f, const char *m) {
+
+template <class F>
+void rejected(F&& f, const char* m) {
   bool caught = false;
   try {
     f();
@@ -19,46 +22,49 @@ template <class F> void rejected(F &&f, const char *m) {
   }
   check(caught, m);
 }
+
 struct MacRecorder : sdk::detail::MacInputApi {
   bool allowed = true, fail_up = false;
   std::vector<sdk::detail::MacInputEvent> events;
-  bool available() noexcept override { return allowed; }
+
+  bool available() noexcept override {
+    return allowed;
+  }
+
   sdk::detail::MacDisplayGeometry display() noexcept override {
     return {2880, 1800, 0, 0, 1440, 900};
   }
-  bool send(const sdk::detail::MacInputEvent &e) noexcept override {
+
+  bool send(const sdk::detail::MacInputEvent& e) noexcept override {
     events.push_back(e);
     return !(fail_up && e.type == "text" && !e.down);
   }
 };
-} // namespace
+}  // namespace
+
 int main() {
   try {
     unsigned calls = 0;
-    auto hotkey =
-        register_emergency_hotkey([&](unsigned key, unsigned long &error) {
-          ++calls;
-          error = 1409;
-          return key == 0x78;
-        });
-    check(calls == 2 && hotkey.available() && hotkey.error == 0,
-          "emergency hotkey fallback");
-    hotkey = register_emergency_hotkey([](unsigned, unsigned long &error) {
+    auto hotkey = register_emergency_hotkey([&](unsigned key, unsigned long& error) {
+      ++calls;
+      error = 1409;
+      return key == 0x78;
+    });
+    check(calls == 2 && hotkey.available() && hotkey.error == 0, "emergency hotkey fallback");
+    hotkey = register_emergency_hotkey([](unsigned, unsigned long& error) {
       error = 1409;
       return false;
     });
-    check(!hotkey.available() && hotkey.error == 1409,
-          "hotkey unavailable is recoverable");
+    check(!hotkey.available() && hotkey.error == 1409, "hotkey unavailable is recoverable");
     ControlProtocol p;
     p.grant = {{"grant_id", "g"}, {"epoch", 1}, {"host_identity", "host"}};
     sdk::DataReceiveParams sender;
     sender.sender_identity = "host";
     sender.topic = sdk::remote_control_topic;
     sender.reliable = true;
-    sdk::Json state = {
-        {"v", 1},        {"type", "layout"},    {"grant_id", "g"},
-        {"epoch", 1},    {"layout_version", 1}, {"width", 1280},
-        {"height", 720}, {"active", true},      {"text_input", true}};
+    sdk::Json state = {{"v", 1},        {"type", "layout"},    {"grant_id", "g"},
+                       {"epoch", 1},    {"layout_version", 1}, {"width", 1280},
+                       {"height", 720}, {"active", true},      {"text_input", true}};
     auto receive = [&](sdk::Json s, sdk::DataReceiveParams source) {
       auto bytes = s.dump();
       return p.receive({bytes.begin(), bytes.end()}, source);
@@ -73,8 +79,7 @@ int main() {
     p.push({{"type", "move"}, {"x", 0.1}});
     p.push({{"type", "move"}, {"x", 0.9}});
     p.flush_move();
-    check(p.queue.size() == 1 && p.next().at("x") == 0.9,
-          "coalesce mouse moves");
+    check(p.queue.size() == 1 && p.next().at("x") == 0.9, "coalesce mouse moves");
     auto now = sdk::ControlClock::now();
     p.text("你好 😀\r\n第二行", now);
     check(p.pending == 1, "pending text");
@@ -94,8 +99,7 @@ int main() {
     p.text("uncertain", now);
     rejected([&] { p.tick(now + std::chrono::seconds(5)); }, "timeout stops");
     p.finish();
-    check(p.queue.size() == 1 && p.next().at("type") == "stop",
-          "stop discards pending text");
+    check(p.queue.size() == 1 && p.next().at("type") == "stop", "stop discards pending text");
     state["layout_version"] = 2;
     receive(state, sender);
     state["layout_version"] = 1;
@@ -117,12 +121,10 @@ int main() {
     check(r->events.back().key == 62 && (r->events.back().flags & (1 << 18)),
           "right control code and flags");
     e.code = "KeyA";
-    check(input->apply(e) && r->events.back().key == 0,
-          "A is valid mac key zero");
+    check(input->apply(e) && r->events.back().key == 0, "A is valid mac key zero");
     e.code = "ControlRight";
     e.down = false;
-    check(input->apply(e) && !(r->events.back().flags & (1 << 18)),
-          "modifier released");
+    check(input->apply(e) && !(r->events.back().flags & (1 << 18)), "modifier released");
     e = {};
     e.type = "button";
     e.positioned = true;
@@ -131,8 +133,7 @@ int main() {
     e.button = 0;
     e.down = true;
     check(input->apply(e), "mouse down");
-    check(r->events.back().x == 720 && r->events.back().y == 450,
-          "retina mapping");
+    check(r->events.back().x == 720 && r->events.back().y == 450, "retina mapping");
     e.type = "move";
     check(input->apply(e) && r->events.back().type == "drag", "drag event");
     e.type = "button";
@@ -144,8 +145,7 @@ int main() {
     e.type = "text";
     e.text = "😀\n";
     check(input->apply(e), "unicode text");
-    check(r->events[r->events.size() - 4].text.size() == 2,
-          "surrogate pair preserved");
+    check(r->events[r->events.size() - 4].text.size() == 2, "surrogate pair preserved");
     r->fail_up = true;
     e.text = "字";
     check(!input->apply(e), "partial text failure");
@@ -157,10 +157,8 @@ int main() {
     e.code = "KeyA";
     check(!input->apply(e), "permission denial");
     auto point = video_point({0, 0, 800, 600}, {1600, 900}, {400, 300});
-    check(point && point->x() == 0.5 && point->y() == 0.5,
-          "center normalization");
-    check(!video_point({0, 0, 800, 600}, {1600, 900}, {400, 20}),
-          "black bar rejected");
+    check(point && point->x() == 0.5 && point->y() == 0.5, "center normalization");
+    check(!video_point({0, 0, 800, 600}, {1600, 900}, {400, 20}), "black bar rejected");
     QKeyEvent k(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier);
     check(key_code(k) == "KeyA", "key mapping");
     sdk::VideoFrame frame;
@@ -171,14 +169,12 @@ int main() {
     frame.y = {16, 16, 16, 16};
     frame.u = {128};
     frame.v = {128};
-    check(convert_frame(frame).pixelColor(0, 0) == QColor(Qt::black),
-          "I420 conversion");
+    check(convert_frame(frame).pixelColor(0, 0) == QColor(Qt::black), "I420 conversion");
     frame.y.clear();
     rejected([&] { convert_frame(frame); }, "truncated frame");
-    std::cout
-        << "Protocol, input boundary, text, geometry and video tests passed\n";
+    std::cout << "Protocol, input boundary, text, geometry and video tests passed\n";
     return 0;
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;
   }

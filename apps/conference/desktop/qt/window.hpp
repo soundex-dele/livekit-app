@@ -16,43 +16,43 @@ class QComboBox;
 class QGridLayout;
 class QTabWidget;
 class QCloseEvent;
+
 namespace meeting {
 class Window : public QMainWindow {
   Q_OBJECT
-public:
+ public:
   explicit Window(bool running = true);
   void applyBusiness(QJsonObject state);
-  void applyMedia(const demo::Snapshot &snapshot);
+  void applyMedia(const demo::Snapshot& snapshot);
   void showHome();
 
-protected:
-  void closeEvent(QCloseEvent *) override;
-  void resizeEvent(QResizeEvent *) override;
+ protected:
+  void closeEvent(QCloseEvent*) override;
+  void resizeEvent(QResizeEvent*) override;
 
-private:
+ private:
   QElapsedTimer elapsed_;
   Api api_;
   demo::Session session_;
   FrameConverter converter_;
   QTimer tick_, poll_, homeTimer_;
-  QStackedWidget *pages_;
+  QStackedWidget* pages_;
   QWidget *home_, *waiting_, *meeting_;
-  QLabel *notice_, *account_, *meetingTitle_, *waitingText_, *connection_,
-      *pageLabel_;
+  QLabel *notice_, *account_, *meetingTitle_, *waitingText_, *connection_, *pageLabel_;
   QListWidget *upcoming_, *history_, *members_;
   QPlainTextEdit *chatLog_, *chatInput_;
-  QTabWidget *side_;
+  QTabWidget* side_;
   QPushButton *mic_, *camera_, *share_, *manage_;
-  QComboBox *layout_;
-  QGridLayout *grid_;
-  QGridLayout *toolbar_ = nullptr;
-  std::vector<QPushButton *> toolbarButtons_;
-  std::vector<VideoWidget *> videos_;
+  QComboBox* layout_;
+  QGridLayout* grid_;
+  QGridLayout* toolbar_ = nullptr;
+  std::vector<QPushButton*> toolbarButtons_;
+  std::vector<VideoWidget*> videos_;
   QJsonObject user_, business_;
   QJsonArray meetings_;
   QString meetingId_, serverError_, mediaError_, chatStamp_;
-  bool running_, closing_ = false, leaving_ = false, connecting_ = false,
-                 polling_ = false, wantCamera_ = false, wantMic_ = false;
+  bool running_, closing_ = false, leaving_ = false, connecting_ = false, polling_ = false,
+                 wantCamera_ = false, wantMic_ = false;
   int cameraIndex_ = 0, videoPage_ = 0;
   qint64 lastUnmute_ = 0;
   QString pendingShare_;
@@ -67,8 +67,7 @@ private:
   void refreshHome();
   void poll();
   void connectMedia();
-  void command(QString action, QJsonObject data = {},
-               std::function<void()> done = {});
+  void command(QString action, QJsonObject data = {}, std::function<void()> done = {});
   void leave(bool end = false, bool closeAfter = false);
   void exitMeeting();
   void invite();
@@ -81,6 +80,6 @@ private:
   void message(QString text);
   QString path(QString suffix = {}) const;
   bool isHost() const;
-  void showDetails(QListWidget *list);
+  void showDetails(QListWidget* list);
 };
-} // namespace meeting
+}  // namespace meeting

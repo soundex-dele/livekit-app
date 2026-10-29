@@ -14,18 +14,23 @@
 #include <QStyle>
 #include <QToolBar>
 #include <QUrl>
+
 namespace remote_app {
 namespace {
 struct NoInput : sdk::ControlInputSink {
-  bool apply(const sdk::ControlInput &) noexcept override { return true; }
+  bool apply(const sdk::ControlInput&) noexcept override {
+    return true;
+  }
 };
-QLabel *label(QString text, QWidget *parent = nullptr) {
+
+QLabel* label(QString text, QWidget* parent = nullptr) {
   auto l = new QLabel(text, parent);
   l->setWordWrap(true);
   l->setTextFormat(Qt::PlainText);
   return l;
 }
-QPushButton *button(QString text, QString name, bool primary = false) {
+
+QPushButton* button(QString text, QString name, bool primary = false) {
   auto b = new QPushButton(text);
   b->setObjectName(name);
   b->setMinimumHeight(38);
@@ -34,7 +39,8 @@ QPushButton *button(QString text, QString name, bool primary = false) {
     b->setProperty("primary", true);
   return b;
 }
-QWidget *card(QString title, QVBoxLayout *&layout) {
+
+QWidget* card(QString title, QVBoxLayout*& layout) {
   auto w = new QFrame;
   w->setObjectName("card");
   layout = new QVBoxLayout(w);
@@ -45,7 +51,8 @@ QWidget *card(QString title, QVBoxLayout *&layout) {
   layout->addWidget(t);
   return w;
 }
-QString state_label(const std::string &v) {
+
+QString state_label(const std::string& v) {
   if (v == "waiting")
     return "等待连接";
   if (v == "pending")
@@ -64,6 +71,7 @@ QString state_label(const std::string &v) {
     return "连接已结束";
   return "准备就绪";
 }
+
 QIcon app_icon(bool active = false) {
   QPixmap pix(64, 64);
   pix.fill(Qt::transparent);
@@ -79,7 +87,8 @@ QIcon app_icon(bool active = false) {
   p.drawLine(32, 42, 32, 50);
   return QIcon(pix);
 }
-} // namespace
+}  // namespace
+
 void apply_theme() {
   qApp->setStyle("Fusion");
   qApp->setWindowIcon(app_icon());
@@ -97,7 +106,8 @@ void apply_theme() {
  QToolButton{padding:6px;} QToolButton:hover{background:#e8f0ff;} QScrollArea{border:0;} QStatusBar{background:white;}
  )");
 }
-ControlWindow::ControlWindow(Controller &controller, QWidget *parent)
+
+ControlWindow::ControlWindow(Controller& controller, QWidget* parent)
     : QMainWindow(parent), controller_(controller) {
   setWindowFlag(Qt::Window);
   setWindowTitle("远程桌面 — AV Remote");
@@ -125,8 +135,7 @@ ControlWindow::ControlWindow(Controller &controller, QWidget *parent)
   auto row = new QHBoxLayout;
   text_ = new QTextEdit;
   text_->setAccessibleName("发送到远端的文字");
-  text_->setPlaceholderText(
-      "输入文字后点击发送，最多 256 个字符。Enter 为换行。");
+  text_->setPlaceholderText("输入文字后点击发送，最多 256 个字符。Enter 为换行。");
   text_->setMaximumHeight(86);
   text_->setObjectName("remoteText");
   send_ = button("发送文字", "sendText", true);
@@ -137,8 +146,7 @@ ControlWindow::ControlWindow(Controller &controller, QWidget *parent)
   video_->send = [this](sdk::Json e) { controller_.input(std::move(e)); };
   video_->released = [this] { controller_.release(); };
   video_->target_selected = [this] {
-    send_->setEnabled(!text_->toPlainText().isEmpty() &&
-                      controller_.snapshot().text_supported);
+    send_->setEnabled(!text_->toPlainText().isEmpty() && controller_.snapshot().text_supported);
   };
   connect(fit, &QAction::triggered, this, [this] {
     video_->set_original(false);
@@ -163,19 +171,20 @@ ControlWindow::ControlWindow(Controller &controller, QWidget *parent)
         return;
       controller_.send_text(text_->toPlainText().toUtf8().toStdString());
       present(controller_.snapshot());
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       status_->setText(QString::fromUtf8(e.what()));
     }
   });
   connect(text_, &QTextEdit::textChanged, this, [this] {
     auto s = controller_.snapshot();
-    send_->setEnabled(!s.finished && s.text_supported && !s.text_pending &&
-                      video_->target() && !text_->toPlainText().isEmpty());
+    send_->setEnabled(!s.finished && s.text_supported && !s.text_pending && video_->target() &&
+                      !text_->toPlainText().isEmpty());
   });
 }
-void ControlWindow::present(const ControllerSnapshot &s) {
-  video_->present(s.image, !s.finished && s.layout > 0 && !s.image.isNull(),
-                  s.text_pending, s.layout);
+
+void ControlWindow::present(const ControllerSnapshot& s) {
+  video_->present(s.image, !s.finished && s.layout > 0 && !s.image.isNull(), s.text_pending,
+                  s.layout);
   if (s.text_accepted > accepted_) {
     accepted_ = s.text_accepted;
     text_->clear();
@@ -186,8 +195,7 @@ void ControlWindow::present(const ControllerSnapshot &s) {
   }
   finished_ = s.finished;
   text_->setEnabled(!s.finished && s.text_supported && !s.text_pending);
-  send_->setEnabled(text_->isEnabled() && video_->target() &&
-                    !text_->toPlainText().isEmpty());
+  send_->setEnabled(text_->isEnabled() && video_->target() && !text_->toPlainText().isEmpty());
   send_->setText(s.text_pending ? "等待确认…" : "发送文字");
   if (!s.error.empty())
     status_->setText(QString::fromStdString(s.error));
@@ -198,7 +206,8 @@ void ControlWindow::present(const ControllerSnapshot &s) {
   else if (!s.text_supported)
     status_->setText("等待远端文字能力确认 · 点击画面启用键鼠");
 }
-void ControlWindow::closeEvent(QCloseEvent *e) {
+
+void ControlWindow::closeEvent(QCloseEvent* e) {
   video_->pause();
   text_->clear();
   controller_.stop();
@@ -206,11 +215,13 @@ void ControlWindow::closeEvent(QCloseEvent *e) {
     stopped();
   e->accept();
 }
-void ControlWindow::changeEvent(QEvent *e) {
+
+void ControlWindow::changeEvent(QEvent* e) {
   if (e->type() == QEvent::ActivationChange && !isActiveWindow())
     video_->pause();
   QMainWindow::changeEvent(e);
 }
+
 MainWindow::MainWindow(bool test)
     : test_(test), host_(test, test ? std::make_shared<NoInput>() : nullptr) {
   setWindowTitle("AV Remote · 远程协助");
@@ -242,8 +253,7 @@ MainWindow::MainWindow(bool test)
     b->setChecked(index == 0);
     auto page = new QWidget;
     pages->addWidget(page);
-    connect(b, &QPushButton::clicked, this,
-            [pages, index] { pages->setCurrentIndex(index); });
+    connect(b, &QPushButton::clicked, this, [pages, index] { pages->setCurrentIndex(index); });
     nav->addWidget(b);
   }
   nav->addStretch();
@@ -289,8 +299,8 @@ MainWindow::MainWindow(bool test)
   remote_code_->setObjectName("remoteCode");
   remote_code_->setPlaceholderText("请输入对方的 10 位连接码");
   remote_code_->setMaxLength(10);
-  remote_code_->setValidator(new QRegularExpressionValidator(
-      QRegularExpression("[0-9]{0,10}"), remote_code_));
+  remote_code_->setValidator(
+      new QRegularExpressionValidator(QRegularExpression("[0-9]{0,10}"), remote_code_));
   peerLabel->setBuddy(remote_code_);
   remote->addWidget(remote_code_);
   auto nameLabel = label("你的称呼（向对方显示）");
@@ -347,10 +357,8 @@ MainWindow::MainWindow(bool test)
        input = button("检查辅助功能权限", "inputPermission");
   settings->addWidget(screen);
   settings->addWidget(input);
-  connect(screen, &QPushButton::clicked, this,
-          [] { Platform::request_screen_permission(); });
-  connect(input, &QPushButton::clicked, this,
-          [] { Platform::request_input_permission(); });
+  connect(screen, &QPushButton::clicked, this, [] { Platform::request_screen_permission(); });
+  connect(input, &QPushButton::clicked, this, [] { Platform::request_input_permission(); });
 #ifndef Q_OS_MACOS
   screen->hide();
   input->hide();
@@ -369,14 +377,12 @@ MainWindow::MainWindow(bool test)
   if (!test_) {
     QSettings preferences;
     restoreGeometry(preferences.value("windowGeometry").toByteArray());
-    url_->setText(
-        preferences.value("serviceUrl", "http://127.0.0.1:8080").toString());
+    url_->setText(preferences.value("serviceUrl", "http://127.0.0.1:8080").toString());
     name_->setText(preferences.value("displayName", "协助者").toString());
     platform_ = std::make_unique<Platform>([this] { stop_all(); });
     auto hotkey = platform_->hotkey();
-    shortcut_->setText(hotkey.empty()
-                           ? "全局快捷键不可用，请使用停止按钮或托盘停止。"
-                           : "紧急停止：" + QString::fromStdString(hotkey));
+    shortcut_->setText(hotkey.empty() ? "全局快捷键不可用，请使用停止按钮或托盘停止。"
+                                      : "紧急停止：" + QString::fromStdString(hotkey));
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
       tray_ = new QSystemTrayIcon(app_icon(), this);
       auto menu = new QMenu(this);
@@ -407,7 +413,7 @@ MainWindow::MainWindow(bool test)
     try {
       if (host_.snapshot().finished && controller_.snapshot().finished)
         save();
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       error(e.what());
     }
   };
@@ -434,7 +440,7 @@ MainWindow::MainWindow(bool test)
       save();
       host_.start(url_->text().trimmed().toStdString());
       refresh();
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       error(e.what());
     }
   });
@@ -442,40 +448,37 @@ MainWindow::MainWindow(bool test)
     try {
       if (!controller_.snapshot().finished || !host_.snapshot().finished)
         return;
-      if (remote_code_->text().size() != 10 ||
-          name_->text().trimmed().isEmpty())
+      if (remote_code_->text().size() != 10 || name_->text().trimmed().isEmpty())
         throw std::runtime_error("请填写 10 位连接码和称呼");
       save();
-      controller_.start(url_->text().trimmed().toStdString(),
-                        remote_code_->text().toStdString(),
+      controller_.start(url_->text().trimmed().toStdString(), remote_code_->text().toStdString(),
                         name_->text().trimmed().toUtf8().toStdString());
       if (control_)
         delete control_;
       control_ = new ControlWindow(controller_, this);
       control_->show();
       refresh();
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       error(e.what());
     }
   });
   connect(approve_, &QPushButton::clicked, this, [this] { host_.approve(); });
   connect(reject_, &QPushButton::clicked, this, [this] { host_.reject(); });
   connect(stop_, &QPushButton::clicked, this, [this] { stop_all(); });
-  display({}, {},
-          test_ ? sdk::ControlPermissions{true, true, true}
-                : sdk::control_permissions());
+  display({}, {}, test_ ? sdk::ControlPermissions{true, true, true} : sdk::control_permissions());
 }
+
 MainWindow::~MainWindow() {
   stop_all();
   if (control_)
     delete control_;
 }
+
 void MainWindow::save() {
   ui_error_.clear();
   auto address = QUrl(url_->text().trimmed());
-  if ((address.scheme() != "http" && address.scheme() != "https") ||
-      address.host().isEmpty() || !address.userInfo().isEmpty() ||
-      address.hasQuery() || address.hasFragment())
+  if ((address.scheme() != "http" && address.scheme() != "https") || address.host().isEmpty() ||
+      !address.userInfo().isEmpty() || address.hasQuery() || address.hasFragment())
     throw std::runtime_error("请输入有效的 HTTP/HTTPS 服务地址");
   if (!test_) {
     QSettings p;
@@ -483,10 +486,12 @@ void MainWindow::save() {
     p.setValue("displayName", name_->text().trimmed());
   }
 }
-void MainWindow::error(const QString &s) {
+
+void MainWindow::error(const QString& s) {
   ui_error_ = s;
   status_->setText(s);
 }
+
 void MainWindow::stop_all() {
   regenerating_ = false;
   ui_error_.clear();
@@ -495,32 +500,26 @@ void MainWindow::stop_all() {
   if (control_)
     control_->video()->pause();
 }
-void MainWindow::display(const Snapshot &h, const ControllerSnapshot &c,
+
+void MainWindow::display(const Snapshot& h, const ControllerSnapshot& c,
                          sdk::ControlPermissions p) {
   bool idle = h.finished && c.finished;
   url_->setEnabled(idle);
   name_->setEnabled(idle);
   remote_code_->setEnabled(idle);
-  create_->setEnabled(c.finished && (h.finished || h.state == "waiting") &&
-                       !closing_ && !regenerating_);
+  create_->setEnabled(c.finished && (h.finished || h.state == "waiting") && !closing_ &&
+                      !regenerating_);
   connect_->setEnabled(idle && !closing_);
-  copy_->setEnabled(!h.code.empty() &&
-                    (h.state == "waiting" || h.state == "pending"));
+  copy_->setEnabled(!h.code.empty() && (h.state == "waiting" || h.state == "pending"));
   stop_->setEnabled(!idle);
-  code_->setText(copy_->isEnabled() ? QString::fromStdString(h.code)
-                                    : QString());
-  create_->setText(h.state == "ended" || h.state == "waiting"
-                       ? "重新生成连接码" : "生成连接码");
-  auto until = QDateTime::fromString(QString::fromStdString(h.expires),
-                                     Qt::ISODateWithMs);
+  code_->setText(copy_->isEnabled() ? QString::fromStdString(h.code) : QString());
+  create_->setText(h.state == "ended" || h.state == "waiting" ? "重新生成连接码" : "生成连接码");
+  auto until = QDateTime::fromString(QString::fromStdString(h.expires), Qt::ISODateWithMs);
   if (!until.isValid())
-    until =
-        QDateTime::fromString(QString::fromStdString(h.expires), Qt::ISODate);
+    until = QDateTime::fromString(QString::fromStdString(h.expires), Qt::ISODate);
   if (copy_->isEnabled() && until.isValid())
-    expiry_->setText(
-        QString("剩余 %1 秒 · 仅供一次申请")
-            .arg(std::max<qint64>(
-                0, QDateTime::currentDateTimeUtc().secsTo(until))));
+    expiry_->setText(QString("剩余 %1 秒 · 仅供一次申请")
+                         .arg(std::max<qint64>(0, QDateTime::currentDateTimeUtc().secsTo(until))));
   else
     expiry_->setText("10 位连接码 · 5 分钟有效 · 单次使用");
   pending_->setVisible(h.state == "pending");
@@ -530,13 +529,10 @@ void MainWindow::display(const Snapshot &h, const ControllerSnapshot &c,
   approve_->setEnabled(p.ready() && !closing_);
   reject_->setEnabled(!closing_);
   permissions_->setText(
-      p.ready()
-          ? "本机已具备屏幕与输入权限。"
-          : QString(
-                "本机被控暂不可用：%1%2%3。请在设置中检查；仍可连接其他设备。")
-                .arg(p.screen ? "" : "屏幕录制权限不足 ",
-                     p.input ? "" : "辅助功能权限不足 ",
-                     p.interactive ? "" : "当前不是可交互桌面 "));
+      p.ready() ? "本机已具备屏幕与输入权限。"
+                : QString("本机被控暂不可用：%1%2%3。请在设置中检查；仍可连接其他设备。")
+                      .arg(p.screen ? "" : "屏幕录制权限不足 ", p.input ? "" : "辅助功能权限不足 ",
+                           p.interactive ? "" : "当前不是可交互桌面 "));
   if (!ui_error_.isEmpty())
     status_->setText(ui_error_);
   else if (!h.error.empty())
@@ -554,6 +550,7 @@ void MainWindow::display(const Snapshot &h, const ControllerSnapshot &c,
                              : "AV Remote · " + status_->text());
   }
 }
+
 void MainWindow::refresh() {
   auto h = host_.snapshot();
   if (regenerating_ && h.finished) {
@@ -564,7 +561,7 @@ void MainWindow::refresh() {
       try {
         host_.start(url_->text().trimmed().toStdString());
         h = host_.snapshot();
-      } catch (const std::exception &e) {
+      } catch (const std::exception& e) {
         error(e.what());
       }
     }
@@ -582,7 +579,8 @@ void MainWindow::refresh() {
     close();
   }
 }
-void MainWindow::closeEvent(QCloseEvent *e) {
+
+void MainWindow::closeEvent(QCloseEvent* e) {
   stop_all();
   if (host_.snapshot().finished && controller_.snapshot().finished) {
     if (!test_)
@@ -597,4 +595,4 @@ void MainWindow::closeEvent(QCloseEvent *e) {
     e->ignore();
   }
 }
-} // namespace remote_app
+}  // namespace remote_app

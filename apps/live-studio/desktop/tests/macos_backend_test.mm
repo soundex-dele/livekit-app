@@ -5,10 +5,12 @@
 #include <cmath>
 #include <iostream>
 using namespace livekit::sdk;
-void check(bool value, const char *message) {
+
+void check(bool value, const char* message) {
   if (!value)
     throw std::runtime_error(message);
 }
+
 void audioTests() {
   studio_detail::MacAudioSamples converter;
   for (int rate : {44100, 48000})
@@ -32,10 +34,12 @@ void audioTests() {
         interleaved[i * 2] = left[i];
         interleaved[i * 2 + 1] = right[i];
       }
+
       struct {
         UInt32 count;
         AudioBuffer buffers[2];
       } buffers{};
+
       buffers.count = planar ? 2 : 1;
       buffers.buffers[0] = {UInt32(planar ? 1 : 2),
                             UInt32(frames * sizeof(float) * (planar ? 1 : 2)),
@@ -48,10 +52,10 @@ void audioTests() {
                   nullptr, nullptr, false, nullptr, nullptr, description, frames,
                   CMTimeMake(packet * frames, rate), nullptr, &sample) == noErr,
               "PCM sample");
-        check(CMSampleBufferSetDataBufferFromAudioBufferList(
-                  sample, nullptr, nullptr, 0, reinterpret_cast<AudioBufferList *>(&buffers)) ==
-                  noErr,
-              "PCM buffers");
+        check(
+            CMSampleBufferSetDataBufferFromAudioBufferList(
+                sample, nullptr, nullptr, 0, reinterpret_cast<AudioBufferList*>(&buffers)) == noErr,
+            "PCM buffers");
         auto output = converter.convert(sample);
         CFRelease(sample);
         samples += output.size() / 2;
@@ -65,7 +69,8 @@ void audioTests() {
       check(samples >= 47900 && samples <= 48000, "continuous 48 kHz resampling clock");
     }
 }
-int main(int argc, char **argv) {
+
+int main(int argc, char** argv) {
   @autoreleasepool {
     try {
       if (argc != 2)
@@ -128,7 +133,7 @@ int main(int argc, char **argv) {
       auto dir = std::filesystem::path(argv[1]);
       std::filesystem::create_directories(dir);
       auto path = dir / "image.png";
-      NSBitmapImageRep *bitmap =
+      NSBitmapImageRep* bitmap =
           [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
                                                   pixelsWide:2
                                                   pixelsHigh:2
@@ -155,7 +160,7 @@ int main(int argc, char **argv) {
       check(roundtrip->width == 2 && roundtrip->height == 2, "I420 conversion");
       std::cout << "Metal, audio conversion, text and image backends passed\n";
       return 0;
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       std::cerr << e.what() << '\n';
       return 1;
     }

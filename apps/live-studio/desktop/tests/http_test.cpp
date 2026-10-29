@@ -2,11 +2,13 @@
 #include <iostream>
 #include <stdexcept>
 using livekit::sdk::Json;
-void check(bool value, const char *message) {
+
+void check(bool value, const char* message) {
   if (!value)
     throw std::runtime_error(message);
 }
-int main(int argc, char **argv) {
+
+int main(int argc, char** argv) {
   try {
     if (argc != 2)
       throw std::runtime_error("test URL required");
@@ -19,7 +21,7 @@ int main(int argc, char **argv) {
       bool rejected = false;
       try {
         av::request(base, path, "test-token");
-      } catch (const std::exception &) {
+      } catch (const std::exception&) {
         rejected = true;
       }
       check(rejected, "unsafe or failed request accepted");
@@ -29,7 +31,7 @@ int main(int argc, char **argv) {
     check(stats.at("headers_ok") == true, "request headers");
     std::cout << "HTTP transport passed\n";
     return 0;
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;
   }

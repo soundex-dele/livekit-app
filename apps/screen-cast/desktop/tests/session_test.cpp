@@ -4,15 +4,17 @@
 #include <iostream>
 #include <stdexcept>
 using namespace std::chrono_literals;
+
 namespace {
-void wait(screen_cast::Session &s) {
+void wait(screen_cast::Session& s) {
   auto end = std::chrono::steady_clock::now() + 8s;
   while (!s.snapshot().finished && std::chrono::steady_clock::now() < end)
     std::this_thread::sleep_for(10ms);
   if (!s.snapshot().finished || s.snapshot().preview)
     throw std::runtime_error("Session did not release resources");
 }
-} // namespace
+}  // namespace
+
 int main() {
   try {
     screen_cast::Session session(true);
@@ -46,7 +48,7 @@ int main() {
     std::cout << "Repeated cancellation, permission denial and cancellation "
                  "before redemption passed (no real capture)\n";
     return 0;
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;
   }

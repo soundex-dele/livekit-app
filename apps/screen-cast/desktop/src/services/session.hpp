@@ -5,22 +5,27 @@
 #include <mutex>
 #include <thread>
 #include <functional>
+
 namespace screen_cast {
-namespace sdk=livekit::sdk;
+namespace sdk = livekit::sdk;
+
 class Session {
  public:
- explicit Session(bool fixture=false,std::function<bool()> permission={}):fixture_(fixture),permission_(std::move(permission)){}
- ~Session();
- void start(std::string url,std::string code,sdk::ScreenCaptureDevice display);
- void stop();
- Snapshot snapshot()const;
+  explicit Session(bool fixture = false, std::function<bool()> permission = {})
+      : fixture_(fixture), permission_(std::move(permission)) {}
+
+  ~Session();
+  void start(std::string url, std::string code, sdk::ScreenCaptureDevice display);
+  void stop();
+  Snapshot snapshot() const;
+
  private:
- void run(std::string url,std::string code,sdk::ScreenCaptureDevice display);
- mutable std::mutex mutex_;
- Snapshot snapshot_;
- std::thread worker_;
- std::atomic<bool> stop_{false};
- bool fixture_;
- std::function<bool()> permission_;
+  void run(std::string url, std::string code, sdk::ScreenCaptureDevice display);
+  mutable std::mutex mutex_;
+  Snapshot snapshot_;
+  std::thread worker_;
+  std::atomic<bool> stop_{false};
+  bool fixture_;
+  std::function<bool()> permission_;
 };
-}
+}  // namespace screen_cast

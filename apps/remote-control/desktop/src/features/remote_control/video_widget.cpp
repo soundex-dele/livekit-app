@@ -15,6 +15,7 @@ QRectF fit_video(QRectF b, QSize s) {
   z.scale(b.size(), Qt::KeepAspectRatio);
   return {b.center() - QPointF(z.width() / 2, z.height() / 2), z};
 }
+
 std::optional<QPointF> video_point(QRectF b, QSize source, QPointF p) {
   auto r = fit_video(b, source);
   if (r.isEmpty() || !r.contains(p))
@@ -22,7 +23,8 @@ std::optional<QPointF> video_point(QRectF b, QSize source, QPointF p) {
   return QPointF(std::clamp((p.x() - r.x()) / r.width(), 0.0, 1.0),
                  std::clamp((p.y() - r.y()) / r.height(), 0.0, 1.0));
 }
-std::string key_code(const QKeyEvent &e) {
+
+std::string key_code(const QKeyEvent& e) {
 #ifdef Q_OS_WIN
   const unsigned scan = e.nativeScanCode();
   static const auto known = []() {
@@ -35,55 +37,21 @@ std::string key_code(const QKeyEvent &e) {
     }
     for (int i = 1; i <= 12; ++i)
       keys.push_back("F" + std::to_string(i));
-    for (auto k : {"Escape",
-                   "Minus",
-                   "Equal",
-                   "Backspace",
-                   "Tab",
-                   "BracketLeft",
-                   "BracketRight",
-                   "Enter",
-                   "ControlLeft",
-                   "Semicolon",
-                   "Quote",
-                   "Backquote",
-                   "ShiftLeft",
-                   "Backslash",
-                   "Comma",
-                   "Period",
-                   "Slash",
-                   "ShiftRight",
-                   "NumpadMultiply",
-                   "AltLeft",
-                   "Space",
-                   "CapsLock",
-                   "NumLock",
-                   "ScrollLock",
-                   "NumpadSubtract",
-                   "NumpadAdd",
-                   "NumpadDecimal",
-                   "ControlRight",
-                   "AltRight",
-                   "NumpadEnter",
-                   "NumpadDivide",
-                   "Home",
-                   "ArrowUp",
-                   "PageUp",
-                   "ArrowLeft",
-                   "ArrowRight",
-                   "End",
-                   "ArrowDown",
-                   "PageDown",
-                   "Insert",
-                   "Delete",
-                   "MetaLeft",
-                   "MetaRight",
-                   "ContextMenu"})
+    for (auto k :
+         {"Escape",       "Minus",         "Equal",        "Backspace",      "Tab",
+          "BracketLeft",  "BracketRight",  "Enter",        "ControlLeft",    "Semicolon",
+          "Quote",        "Backquote",     "ShiftLeft",    "Backslash",      "Comma",
+          "Period",       "Slash",         "ShiftRight",   "NumpadMultiply", "AltLeft",
+          "Space",        "CapsLock",      "NumLock",      "ScrollLock",     "NumpadSubtract",
+          "NumpadAdd",    "NumpadDecimal", "ControlRight", "AltRight",       "NumpadEnter",
+          "NumpadDivide", "Home",          "ArrowUp",      "PageUp",         "ArrowLeft",
+          "ArrowRight",   "End",           "ArrowDown",    "PageDown",       "Insert",
+          "Delete",       "MetaLeft",      "MetaRight",    "ContextMenu"})
       keys.emplace_back(k);
     return keys;
   }();
   if (scan)
-    for (const auto &k : known)
+    for (const auto& k : known)
       if (livekit::sdk::control_key_scan_code(k) == scan)
         return k;
 #elif defined(Q_OS_MACOS)
@@ -197,63 +165,63 @@ std::string key_code(const QKeyEvent &e) {
   if (e.key() >= Qt::Key_A && e.key() <= Qt::Key_Z)
     return std::string("Key") + char('A' + e.key() - Qt::Key_A);
   if (e.key() >= Qt::Key_0 && e.key() <= Qt::Key_9)
-    return std::string(e.modifiers().testFlag(Qt::KeypadModifier) ? "Numpad"
-                                                                  : "Digit") +
+    return std::string(e.modifiers().testFlag(Qt::KeypadModifier) ? "Numpad" : "Digit") +
            char('0' + e.key() - Qt::Key_0);
   if (e.key() >= Qt::Key_F1 && e.key() <= Qt::Key_F12)
     return "F" + std::to_string(e.key() - Qt::Key_F1 + 1);
   switch (e.key()) {
-  case Qt::Key_Control:
-    return "ControlLeft";
-  case Qt::Key_Meta:
-    return "MetaLeft";
-  case Qt::Key_Alt:
-    return "AltLeft";
-  case Qt::Key_Shift:
-    return "ShiftLeft";
-  case Qt::Key_Return:
-    return "Enter";
-  case Qt::Key_Enter:
-    return "NumpadEnter";
-  case Qt::Key_Tab:
-  case Qt::Key_Backtab:
-    return "Tab";
-  case Qt::Key_Backspace:
-    return "Backspace";
-  case Qt::Key_Delete:
-    return "Delete";
-  case Qt::Key_Escape:
-    return "Escape";
-  case Qt::Key_Space:
-    return "Space";
-  case Qt::Key_Left:
-    return "ArrowLeft";
-  case Qt::Key_Right:
-    return "ArrowRight";
-  case Qt::Key_Up:
-    return "ArrowUp";
-  case Qt::Key_Down:
-    return "ArrowDown";
-  case Qt::Key_Home:
-    return "Home";
-  case Qt::Key_End:
-    return "End";
-  case Qt::Key_PageUp:
-    return "PageUp";
-  case Qt::Key_PageDown:
-    return "PageDown";
-  default:
-    return {};
+    case Qt::Key_Control:
+      return "ControlLeft";
+    case Qt::Key_Meta:
+      return "MetaLeft";
+    case Qt::Key_Alt:
+      return "AltLeft";
+    case Qt::Key_Shift:
+      return "ShiftLeft";
+    case Qt::Key_Return:
+      return "Enter";
+    case Qt::Key_Enter:
+      return "NumpadEnter";
+    case Qt::Key_Tab:
+    case Qt::Key_Backtab:
+      return "Tab";
+    case Qt::Key_Backspace:
+      return "Backspace";
+    case Qt::Key_Delete:
+      return "Delete";
+    case Qt::Key_Escape:
+      return "Escape";
+    case Qt::Key_Space:
+      return "Space";
+    case Qt::Key_Left:
+      return "ArrowLeft";
+    case Qt::Key_Right:
+      return "ArrowRight";
+    case Qt::Key_Up:
+      return "ArrowUp";
+    case Qt::Key_Down:
+      return "ArrowDown";
+    case Qt::Key_Home:
+      return "Home";
+    case Qt::Key_End:
+      return "End";
+    case Qt::Key_PageUp:
+      return "PageUp";
+    case Qt::Key_PageDown:
+      return "PageDown";
+    default:
+      return {};
   }
 }
-VideoWidget::VideoWidget(QWidget *p) : QWidget(p) {
+
+VideoWidget::VideoWidget(QWidget* p) : QWidget(p) {
   setFocusPolicy(Qt::StrongFocus);
   setMouseTracking(true);
   setMinimumSize(320, 180);
   setAccessibleName("远程桌面，点击启用键鼠，离开窗口暂停输入");
 }
-void VideoWidget::present(QImage image, bool available, bool busy,
-                          uint64_t layout) {
+
+void VideoWidget::present(QImage image, bool available, bool busy, uint64_t layout) {
   if (layout_ != layout || !available) {
     pause();
     layout_ = layout;
@@ -265,6 +233,7 @@ void VideoWidget::present(QImage image, bool available, bool busy,
     resize(image_.size() / devicePixelRatioF());
   update();
 }
+
 void VideoWidget::pause() {
   enabled_ = false;
   target_ = false;
@@ -272,20 +241,22 @@ void VideoWidget::pause() {
     released();
   update();
 }
+
 void VideoWidget::set_original(bool v) {
   pause();
   original_ = v;
-  setMinimumSize(v && !image_.isNull() ? image_.size() / devicePixelRatioF()
-                                       : QSize(320, 180));
+  setMinimumSize(v && !image_.isNull() ? image_.size() / devicePixelRatioF() : QSize(320, 180));
   if (v && !image_.isNull())
     resize(image_.size() / devicePixelRatioF());
   updateGeometry();
   update();
 }
+
 std::optional<QPointF> VideoWidget::point(QPointF p) const {
   return video_point(rect(), image_.size(), p);
 }
-void VideoWidget::paintEvent(QPaintEvent *) {
+
+void VideoWidget::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.fillRect(rect(), QColor("#172033"));
   if (image_.isNull()) {
@@ -300,7 +271,8 @@ void VideoWidget::paintEvent(QPaintEvent *) {
     p.drawRect(rect().adjusted(1, 1, -2, -2));
   }
 }
-void VideoWidget::mouse(QMouseEvent *e, bool down) {
+
+void VideoWidget::mouse(QMouseEvent* e, bool down) {
   auto p = point(e->position());
   if (!available_ || busy_ || !p) {
     if (!down)
@@ -320,21 +292,25 @@ void VideoWidget::mouse(QMouseEvent *e, bool down) {
       target_selected();
   }
   if (enabled_ && send)
-    send({{"type", "button"},
-          {"button", b},
-          {"down", down},
-          {"x", p->x()},
-          {"y", p->y()}});
+    send({{"type", "button"}, {"button", b}, {"down", down}, {"x", p->x()}, {"y", p->y()}});
   e->accept();
 }
-void VideoWidget::mousePressEvent(QMouseEvent *e) { mouse(e, true); }
-void VideoWidget::mouseReleaseEvent(QMouseEvent *e) { mouse(e, false); }
-void VideoWidget::mouseMoveEvent(QMouseEvent *e) {
+
+void VideoWidget::mousePressEvent(QMouseEvent* e) {
+  mouse(e, true);
+}
+
+void VideoWidget::mouseReleaseEvent(QMouseEvent* e) {
+  mouse(e, false);
+}
+
+void VideoWidget::mouseMoveEvent(QMouseEvent* e) {
   auto p = point(e->position());
   if (enabled_ && !busy_ && p && send)
     send({{"type", "move"}, {"x", p->x()}, {"y", p->y()}});
 }
-void VideoWidget::wheelEvent(QWheelEvent *e) {
+
+void VideoWidget::wheelEvent(QWheelEvent* e) {
   auto p = point(e->position());
   if (enabled_ && !busy_ && p && send) {
     int d = e->angleDelta().y();
@@ -345,7 +321,8 @@ void VideoWidget::wheelEvent(QWheelEvent *e) {
     e->accept();
   }
 }
-void VideoWidget::keyPressEvent(QKeyEvent *e) {
+
+void VideoWidget::keyPressEvent(QKeyEvent* e) {
   auto code = key_code(*e);
   if (enabled_ && !busy_ && !code.empty() && send) {
     send({{"type", "key"}, {"code", code}, {"down", true}});
@@ -353,7 +330,8 @@ void VideoWidget::keyPressEvent(QKeyEvent *e) {
   } else
     QWidget::keyPressEvent(e);
 }
-void VideoWidget::keyReleaseEvent(QKeyEvent *e) {
+
+void VideoWidget::keyReleaseEvent(QKeyEvent* e) {
   if (e->isAutoRepeat())
     return;
   auto code = key_code(*e);
@@ -363,23 +341,25 @@ void VideoWidget::keyReleaseEvent(QKeyEvent *e) {
   } else
     QWidget::keyReleaseEvent(e);
 }
-void VideoWidget::focusOutEvent(QFocusEvent *e) {
+
+void VideoWidget::focusOutEvent(QFocusEvent* e) {
   enabled_ = false;
   if (released)
     released();
   QWidget::focusOutEvent(e);
 }
-bool VideoWidget::event(QEvent *e) {
+
+bool VideoWidget::event(QEvent* e) {
   if (e->type() == QEvent::ShortcutOverride && enabled_) {
     e->accept();
     return true;
   }
   if (e->type() == QEvent::KeyPress && enabled_ &&
-      (static_cast<QKeyEvent *>(e)->key() == Qt::Key_Tab ||
-       static_cast<QKeyEvent *>(e)->key() == Qt::Key_Backtab)) {
-    keyPressEvent(static_cast<QKeyEvent *>(e));
+      (static_cast<QKeyEvent*>(e)->key() == Qt::Key_Tab ||
+       static_cast<QKeyEvent*>(e)->key() == Qt::Key_Backtab)) {
+    keyPressEvent(static_cast<QKeyEvent*>(e));
     return true;
   }
   return QWidget::event(e);
 }
-} // namespace remote_app
+}  // namespace remote_app

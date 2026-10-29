@@ -10,6 +10,7 @@
 namespace player_demo {
 namespace sdk = livekit::sdk;
 enum class Operation { none, open, play, pause, seek, stop, recover, close };
+
 class Controller final : public QObject {
   Q_OBJECT
  public:
@@ -22,15 +23,41 @@ class Controller final : public QObject {
   void close();
   void setVolume(int value, bool muted);
   bool loadSubtitles(const QString& path);
-  bool busy() const { return operation_ != Operation::none; }
-  bool closing() const { return closing_; }
-  bool finished() const { return finished_; }
+
+  bool busy() const {
+    return operation_ != Operation::none;
+  }
+
+  bool closing() const {
+    return closing_;
+  }
+
+  bool finished() const {
+    return finished_;
+  }
+
   bool drained() const;
-  sdk::PlayerSnapshot snapshot() const { return player_.snapshot(); }
-  const QString& path() const { return path_; }
-  const QString& error() const { return error_; }
-  QString warning() const { return audio_->warning(); }
-  const QImage& image() const { return image_; }
+
+  sdk::PlayerSnapshot snapshot() const {
+    return player_.snapshot();
+  }
+
+  const QString& path() const {
+    return path_;
+  }
+
+  const QString& error() const {
+    return error_;
+  }
+
+  QString warning() const {
+    return audio_->warning();
+  }
+
+  const QImage& image() const {
+    return image_;
+  }
+
   Subtitles subtitles;
   QString subtitleError;
  signals:
@@ -41,6 +68,7 @@ class Controller final : public QObject {
   void failed(const QString&);
   void closed();
   void ticked();
+
  private:
   void update();
   void startOpen(const QString&, qint64);
@@ -62,4 +90,4 @@ class Controller final : public QObject {
   bool closing_ = false, finished_ = false, autoplay_ = false, endEmitted_ = false;
   bool stopRequested_ = false, failureEmitted_ = false;
 };
-}
+}  // namespace player_demo

@@ -7,16 +7,158 @@
 #include <iostream>
 #include <thread>
 using namespace livekit::sdk;
-int main(int argc,char**argv){try{
- std::string settings;std::string base="http://127.0.0.1:19081",name="fixture_host",record;int duration=120;bool software=false;for(int i=1;i<argc;++i){std::string a=argv[i];auto next=[&]{if(++i>=argc)throw std::runtime_error("missing argument");return std::string(argv[i]);};if(a=="--settings")settings=next();else if(a=="--url")base=next();else if(a=="--name")name=next();else if(a=="--duration")duration=std::stoi(next());else if(a=="--record")record=next();else if(a=="--software")software=true;else throw std::runtime_error("unknown argument");}
- if(settings.empty())throw std::runtime_error("--settings test directory required");
- auto*password=std::getenv("STUDIO_FIXTURE_PASSWORD");if(!password)throw std::runtime_error("STUDIO_FIXTURE_PASSWORD required");
- StudioOptions opts;opts.software_gpu=software;studio_app::Session session(std::filesystem::u8path(settings)/"account.bin",opts);auto engine=session.engine();auto&studio=*engine;session.login(base,name,password,true);StudioScene scene;StudioSource bg;bg.id="background";bg.color=name.ends_with("b")?std::array<float,4>{.4f,.1f,.1f,1}:std::array<float,4>{.1f,.15f,.3f,1};scene.sources.push_back(bg);StudioSource marker;marker.id="marker";marker.color={1,.2f,.1f,1};marker.transform={0,.3f,.2f,.3f};scene.sources.push_back(marker);StudioSource flash;flash.id="av-marker";flash.transform={0,0,.12f,.12f};flash.color={0,0,0,1};scene.sources.push_back(flash);session.set_scene(scene);
- auto wait=[&](auto predicate){auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);while(!predicate()){auto state=session.snapshot();if(!state.error.empty())throw std::runtime_error(state.error);if(std::chrono::steady_clock::now()>deadline)throw std::runtime_error("Session startup timeout");std::this_thread::sleep_for(std::chrono::milliseconds(50));}};
- wait([&]{return !session.snapshot().user.is_null();});session.start("测试直播 "+name);wait([&]{return session.snapshot().state=="直播中";});if(!record.empty())studio.start_recording(std::filesystem::u8path(record));auto ready=session.snapshot();std::cout<<Json{{"event","ready"},{"broadcast",ready.broadcast},{"room",ready.live.at("broadcast").at("room")},{"user",ready.user.at("id")}}.dump()<<std::endl;
-  auto start=std::chrono::steady_clock::now(),next=start,heartbeat=start;uint64_t samples=0;int previous=-1;while(std::chrono::steady_clock::now()-start<std::chrono::seconds(duration)){
-  auto now=std::chrono::steady_clock::now();if(now>=next){AudioFrame frame;frame.format=AudioSampleFormat::float32;frame.sample_rate=48000;frame.channels=2;frame.samples_per_channel=480;frame.float_samples.resize(960);for(int i=0;i<480;++i){float value=(std::chrono::duration_cast<std::chrono::milliseconds>(now-start).count()%2000<250?.15f:0.f)*float(std::sin((samples+i)*2*3.141592653589793*440/48000));frame.float_samples[i*2]=frame.float_samples[i*2+1]=value;}studio.submit_remote_audio("tone",frame);samples+=480;next+=std::chrono::milliseconds(10);int tick=int(std::chrono::duration_cast<std::chrono::milliseconds>(now-start).count()/33);if(tick!=previous){previous=tick;scene.sources[1].transform.x=float(tick%40)/50;float white=std::chrono::duration_cast<std::chrono::milliseconds>(now-start).count()%2000<250?1.f:0.f;scene.sources[2].color={white,white,white,1};session.set_scene(scene);}}
-  if(now>=heartbeat){auto current=session.snapshot();if(current.broadcast.empty())break;std::cout<<Json{{"event","stats"},{"kbps",current.bitrate_kbps},{"fps",current.publish_fps},{"media",current.media_stats},{"session_error",current.error},{"stage_video",current.stage_video_frames},{"stage_audio",current.stage_audio_frames},{"stage_subscriptions",current.stage_subscriptions}}.dump()<<std::endl;heartbeat=now+std::chrono::seconds(3);}if(!studio.snapshot().error.empty())throw std::runtime_error(studio.snapshot().error);std::this_thread::sleep_for(std::chrono::milliseconds(2));
- }
- session.stop();studio.stop_recording();for(int i=0;i<200&&studio.snapshot().recording;++i)std::this_thread::sleep_for(std::chrono::milliseconds(50));auto status=studio.snapshot();std::cout<<Json{{"event","finished"},{"frames",status.frames},{"dropped",status.dropped},{"error",status.error}}.dump()<<std::endl;return status.error.empty()?0:1;
- }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+
+int main(int argc, char** argv) {
+  try {
+    std::string settings;
+    std::string base = "http://127.0.0.1:19081", name = "fixture_host", record;
+    int duration = 120;
+    bool software = false;
+    for (int i = 1; i < argc; ++i) {
+      std::string a = argv[i];
+      auto next = [&] {
+        if (++i >= argc)
+          throw std::runtime_error("missing argument");
+        return std::string(argv[i]);
+      };
+      if (a == "--settings")
+        settings = next();
+      else if (a == "--url")
+        base = next();
+      else if (a == "--name")
+        name = next();
+      else if (a == "--duration")
+        duration = std::stoi(next());
+      else if (a == "--record")
+        record = next();
+      else if (a == "--software")
+        software = true;
+      else
+        throw std::runtime_error("unknown argument");
+    }
+    if (settings.empty())
+      throw std::runtime_error("--settings test directory required");
+    auto* password = std::getenv("STUDIO_FIXTURE_PASSWORD");
+    if (!password)
+      throw std::runtime_error("STUDIO_FIXTURE_PASSWORD required");
+    StudioOptions opts;
+    opts.software_gpu = software;
+    studio_app::Session session(std::filesystem::u8path(settings) / "account.bin", opts);
+    auto engine = session.engine();
+    auto& studio = *engine;
+    session.login(base, name, password, true);
+    StudioScene scene;
+    StudioSource bg;
+    bg.id = "background";
+    bg.color = name.ends_with("b") ? std::array<float, 4>{.4f, .1f, .1f, 1}
+                                   : std::array<float, 4>{.1f, .15f, .3f, 1};
+    scene.sources.push_back(bg);
+    StudioSource marker;
+    marker.id = "marker";
+    marker.color = {1, .2f, .1f, 1};
+    marker.transform = {0, .3f, .2f, .3f};
+    scene.sources.push_back(marker);
+    StudioSource flash;
+    flash.id = "av-marker";
+    flash.transform = {0, 0, .12f, .12f};
+    flash.color = {0, 0, 0, 1};
+    scene.sources.push_back(flash);
+    session.set_scene(scene);
+    auto wait = [&](auto predicate) {
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+      while (!predicate()) {
+        auto state = session.snapshot();
+        if (!state.error.empty())
+          throw std::runtime_error(state.error);
+        if (std::chrono::steady_clock::now() > deadline)
+          throw std::runtime_error("Session startup timeout");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+    };
+    wait([&] { return !session.snapshot().user.is_null(); });
+    session.start("测试直播 " + name);
+    wait([&] { return session.snapshot().state == "直播中"; });
+    if (!record.empty())
+      studio.start_recording(std::filesystem::u8path(record));
+    auto ready = session.snapshot();
+    std::cout << Json{{"event", "ready"},
+                      {"broadcast", ready.broadcast},
+                      {"room", ready.live.at("broadcast").at("room")},
+                      {"user", ready.user.at("id")}}
+                     .dump()
+              << std::endl;
+    auto start = std::chrono::steady_clock::now(), next = start, heartbeat = start;
+    uint64_t samples = 0;
+    int previous = -1;
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(duration)) {
+      auto now = std::chrono::steady_clock::now();
+      if (now >= next) {
+        AudioFrame frame;
+        frame.format = AudioSampleFormat::float32;
+        frame.sample_rate = 48000;
+        frame.channels = 2;
+        frame.samples_per_channel = 480;
+        frame.float_samples.resize(960);
+        for (int i = 0; i < 480; ++i) {
+          float value =
+              (std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() % 2000 <
+                       250
+                   ? .15f
+                   : 0.f) *
+              float(std::sin((samples + i) * 2 * 3.141592653589793 * 440 / 48000));
+          frame.float_samples[i * 2] = frame.float_samples[i * 2 + 1] = value;
+        }
+        studio.submit_remote_audio("tone", frame);
+        samples += 480;
+        next += std::chrono::milliseconds(10);
+        int tick =
+            int(std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() / 33);
+        if (tick != previous) {
+          previous = tick;
+          scene.sources[1].transform.x = float(tick % 40) / 50;
+          float white =
+              std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() % 2000 <
+                      250
+                  ? 1.f
+                  : 0.f;
+          scene.sources[2].color = {white, white, white, 1};
+          session.set_scene(scene);
+        }
+      }
+      if (now >= heartbeat) {
+        auto current = session.snapshot();
+        if (current.broadcast.empty())
+          break;
+        std::cout << Json{{"event", "stats"},
+                          {"kbps", current.bitrate_kbps},
+                          {"fps", current.publish_fps},
+                          {"media", current.media_stats},
+                          {"session_error", current.error},
+                          {"stage_video", current.stage_video_frames},
+                          {"stage_audio", current.stage_audio_frames},
+                          {"stage_subscriptions", current.stage_subscriptions}}
+                         .dump()
+                  << std::endl;
+        heartbeat = now + std::chrono::seconds(3);
+      }
+      if (!studio.snapshot().error.empty())
+        throw std::runtime_error(studio.snapshot().error);
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    session.stop();
+    studio.stop_recording();
+    for (int i = 0; i < 200 && studio.snapshot().recording; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    auto status = studio.snapshot();
+    std::cout << Json{{"event", "finished"},
+                      {"frames", status.frames},
+                      {"dropped", status.dropped},
+                      {"error", status.error}}
+                     .dump()
+              << std::endl;
+    return status.error.empty() ? 0 : 1;
+  } catch (const std::exception& e) {
+    std::cerr << e.what() << '\n';
+    return 1;
+  }
+}
