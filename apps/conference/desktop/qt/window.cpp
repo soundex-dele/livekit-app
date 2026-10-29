@@ -744,7 +744,7 @@ void Window::applyBusiness(QJsonObject state) {
           if (auto local = media_.participants.find(media_.local_sid);
               local != media_.participants.end())
             for (auto &t : local->second.tracks)
-              if (t.source == demo::sdk::TrackSource::microphone) {
+              if (t.source == demo::rtc::PublicationSource::microphone) {
                 found = true;
                 if (t.muted)
                   session_.set_muted(t.sid, false);
@@ -815,9 +815,9 @@ void Window::connectMedia() {
           return;
         }
         auto v = value.toObject();
-        demo::sdk::RoomOptions o;
-        o.url = v.value("media_url").toString().toStdString();
-        o.token = v.value("media_token").toString().toStdString();
+        demo::SessionOptions o;
+        o.connection.url = v.value("media_url").toString().toStdString();
+        o.connection.token = v.value("media_token").toString().toStdString();
         o.room = v.value("room").toString().toStdString();
         o.audio_playout = true;
         o.microphone = wantMic_;
@@ -829,7 +829,7 @@ void Window::connectMedia() {
           o.media.push_back(spec);
         }
         auto generation = api_.epoch();
-        o.token_provider = [this,
+        o.connection.token_provider = [this,
                             generation](demo::sdk::TokenRequest request,
                                         demo::sdk::TokenCompletion complete) {
           QMetaObject::invokeMethod(
@@ -895,11 +895,11 @@ void Window::applyMedia(const demo::Snapshot &snapshot) {
   if (auto p = snapshot.participants.find(snapshot.local_sid);
       p != snapshot.participants.end()) {
     for (auto &t : p->second.tracks) {
-      if (t.source == demo::sdk::TrackSource::microphone)
+      if (t.source == demo::rtc::PublicationSource::microphone)
         microphone = !t.muted;
-      if (t.source == demo::sdk::TrackSource::camera)
+      if (t.source == demo::rtc::PublicationSource::camera)
         camera = !t.muted;
-      if (t.source == demo::sdk::TrackSource::screen_share)
+      if (t.source == demo::rtc::PublicationSource::screen)
         sharing = true;
     }
   }
@@ -952,8 +952,8 @@ void Window::updateVideos() {
     std::string shared;
     for (auto &[_, p] : media_.participants)
       for (auto &t : p.tracks)
-        if (t.source == demo::sdk::TrackSource::screen_share)
-          shared = p.sid == media_.local_sid ? "local-" + t.client_id : t.sid;
+        if (t.source == demo::rtc::PublicationSource::screen)
+          shared = p.sid == media_.local_sid ? t.local_id : t.sid;
     std::stable_sort(tiles.begin(), tiles.end(), [&](auto &a, auto &b) {
       return a.id == shared && b.id != shared;
     });
@@ -964,9 +964,9 @@ void Window::updateVideos() {
       if (p.audio_level > level) {
         level = p.audio_level;
         for (const auto &t : p.tracks)
-          if (t.kind == demo::sdk::TrackKind::video &&
-              t.source != demo::sdk::TrackSource::screen_share) {
-            active = p.sid == media_.local_sid ? "local-" + t.client_id : t.sid;
+          if (t.kind == demo::rtc::PublicationKind::video &&
+              t.source != demo::rtc::PublicationSource::screen) {
+            active = p.sid == media_.local_sid ? t.local_id : t.sid;
             break;
           }
       }
@@ -1020,7 +1020,7 @@ void Window::toggleMicrophone() {
   if (auto p = media_.participants.find(media_.local_sid);
       p != media_.participants.end()) {
     for (auto &t : p->second.tracks)
-      if (t.source == demo::sdk::TrackSource::microphone) {
+      if (t.source == demo::rtc::PublicationSource::microphone) {
         session_.set_muted(t.sid, !t.muted);
         return;
       }
@@ -1032,7 +1032,7 @@ void Window::toggleCamera() {
   if (auto p = media_.participants.find(media_.local_sid);
       p != media_.participants.end()) {
     for (auto &t : p->second.tracks)
-      if (t.source == demo::sdk::TrackSource::camera) {
+      if (t.source == demo::rtc::PublicationSource::camera) {
         session_.remove_video(t.sid);
         return;
       }
@@ -1053,7 +1053,7 @@ void Window::toggleShare() {
   if (auto p = media_.participants.find(media_.local_sid);
       p != media_.participants.end()) {
     for (auto &t : p->second.tracks)
-      if (t.source == demo::sdk::TrackSource::screen_share) {
+      if (t.source == demo::rtc::PublicationSource::screen) {
         session_.remove_video(t.sid);
         command("share", {{"enabled", false}});
         return;

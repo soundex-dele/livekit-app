@@ -38,7 +38,7 @@ void ChatLog::append(ChatMessage message) {
   if (messages_.size() > 200) messages_.pop_front();
   ++revision_;
 }
-bool ChatLog::receive(const std::vector<uint8_t>& payload, const livekit::sdk::DataReceiveParams& params,
+bool ChatLog::receive(const std::vector<uint8_t>& payload, const demo::ChatSource& params,
                       const std::string& name, const std::string& local_identity) {
   if (params.topic != chat_topic || !params.reliable || params.sender_identity.empty() || params.sender_identity == local_identity || payload.size() > 16384) return false;
   try {

@@ -1,7 +1,7 @@
 #pragma once
 #include "domain/snapshot.hpp"
 #include "infrastructure/http.hpp"
-#include <livekit/room.hpp>
+#include <livekit/media.hpp>
 #include <livekit/remote_control.hpp>
 #include <atomic>
 #include <deque>
@@ -26,13 +26,10 @@ class Session {
   mutable std::mutex mutex_;
   Snapshot snapshot_;
   sdk::ControlGrant grant_;
-  std::deque<std::pair<std::vector<uint8_t>,sdk::DataReceiveParams>> incoming_;
-  std::shared_ptr<sdk::Room> room_;
   std::shared_ptr<sdk::RemoteControlSession> control_;
   std::thread worker_,rtc_;
   std::atomic<bool> stop_{false};
   std::atomic<int> action_{0};
-  std::stop_source cancellation_;
   bool fixture_;
 };
 }

@@ -122,7 +122,7 @@ private slots:
     snapshot.state = demo::State::Connected;
     snapshot.finished = false;
     for (int i = 0; i < 25; i++) {
-      demo::sdk::ParticipantInfo p;
+      demo::Participant p;
       p.sid = "p" + std::to_string(i);
       p.identity = p.sid;
       p.name = "参会者 " + std::to_string(i);
@@ -137,11 +137,11 @@ private slots:
     save("meeting-narrow");
     // A visible tile must follow layout mode and disappear with its member.
     auto &speaker = snapshot.participants.at("p24");
-    demo::sdk::TrackInfo track;
+    demo::TrackInfo track;
     track.sid = "screen24";
     track.name = "共享屏幕";
-    track.kind = demo::sdk::TrackKind::video;
-    track.source = demo::sdk::TrackSource::screen_share;
+    track.kind = demo::rtc::PublicationKind::video;
+    track.source = demo::rtc::PublicationSource::screen;
     track.subscribed = true;
     speaker.tracks.push_back(track);
     window.applyMedia(snapshot);
@@ -175,9 +175,9 @@ private slots:
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));
     demo::Session session;
-    demo::sdk::RoomOptions options;
-    options.url = QString("ws://127.0.0.1:%1").arg(server.serverPort()).toStdString();
-    options.token = "cancel-test";
+    demo::SessionOptions options;
+    options.connection.url = QString("ws://127.0.0.1:%1").arg(server.serverPort()).toStdString();
+    options.connection.token = "cancel-test";
     options.audio_playout = false;
     options.microphone = false;
     session.start(options);

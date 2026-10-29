@@ -46,9 +46,7 @@ private:
   mutable std::mutex mutex_;
   ControllerSnapshot snapshot_;
   ControlProtocol protocol_;
-  std::shared_ptr<sdk::Room> room_;
   std::thread worker_, rtc_;
   std::atomic<bool> stop_{false};
-  std::stop_source cancellation_;
 };
 } // namespace remote_app

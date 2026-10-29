@@ -1,3 +1,4 @@
+#include "services/rtc_connection.hpp"
 #include "controller.hpp"
 #include <algorithm>
 #include <future>
@@ -186,7 +187,6 @@ void Controller::start(std::string url, std::string code, std::string name) {
   while (!url.empty() && url.back() == '/')
     url.pop_back();
   stop_ = false;
-  cancellation_ = std::stop_source{};
   {
     std::lock_guard lock(mutex_);
     snapshot_ = {};
@@ -198,7 +198,7 @@ void Controller::start(std::string url, std::string code, std::string name) {
 }
 void Controller::stop() {
   stop_ = true;
-  cancellation_.request_stop();
+
 }
 void Controller::fail(std::string error) {
   std::lock_guard lock(mutex_);
@@ -281,7 +281,7 @@ void Controller::run(std::string url, std::string code, std::string name) {
     fail(e.what());
   }
   stop_ = true;
-  cancellation_.request_stop();
+
   if (rtc_.joinable())
     rtc_.join();
   if (!id.empty())
@@ -292,15 +292,6 @@ void Controller::run(std::string url, std::string code, std::string name) {
     } catch (const std::exception &e) {
       fail(e.what());
     }
-  std::shared_ptr<sdk::Room> room;
-  {
-    std::lock_guard lock(mutex_);
-    room = std::move(room_);
-  }
-  if (room) {
-    room->request_stop();
-    room->disconnect();
-  }
   {
     std::lock_guard lock(mutex_);
     protocol_.finish();
@@ -312,7 +303,7 @@ void Controller::run(std::string url, std::string code, std::string name) {
 }
 void Controller::media(std::string url, sdk::Json grant,
                        std::string credential) {
-  std::shared_ptr<sdk::Room> room;
+  std::unique_ptr<RtcConnection> connection;
   try {
     sdk::Json empty = sdk::Json::object();
     auto connect = request(url,
@@ -321,41 +312,8 @@ void Controller::media(std::string url, sdk::Json grant,
                            credential, &empty);
     if (stop_)
       return;
-    sdk::RoomCallback cb;
-    cb.on_data_received = [this](const auto &bytes, const auto &params) {
-      try {
-        std::lock_guard lock(mutex_);
-        if (stop_)
-          return;
-        if (protocol_.receive(bytes, params))
-          snapshot_.state = "connected";
-      } catch (const std::exception &e) {
-        fail(e.what());
-      }
-    };
-    cb.on_disconnected = [this](int) {
-      if (!stop_)
-        fail("媒体连接已断开，请重新申请");
-    };
-    cb.on_participant_disconnected =
-        [this,
-         host = grant.at("host_identity").get<std::string>()](const auto &p) {
-          if (!stop_ && p.identity() == host)
-            fail("被控端已离线");
-        };
-    auto frames = std::make_shared<sdk::VideoFrameStream>(
-        sdk::VideoStreamOptions{2, 32 * 1024 * 1024});
-    room = std::make_shared<sdk::Room>(cb);
-    {
-      std::lock_guard lock(mutex_);
-      room_ = room;
-    }
-    sdk::RoomOptions options;
-    options.connect_timeout = 10;
-    options.reconnect.enabled = false;
-    options.video_frame_stream = frames;
-    room->join_with_token(connect.at("media_url"), connect.at("media_token"),
-                          options, cancellation_.get_token());
+    connection = std::make_unique<RtcConnection>(connect.at("media_url"), connect.at("media_token"),
+        grant.at("host_identity"), true, stop_);
     auto next = sdk::ControlClock::now(), move_at = next,
          layout_deadline = next + 10s;
     struct Send {
@@ -363,8 +321,12 @@ void Controller::media(std::string url, sdk::Json grant,
       sdk::ControlClock::time_point deadline;
     };
     std::optional<Send> sending;
-    while (!stop_ &&
-           room->connection_state() == sdk::ConnectionState::connected) {
+    while (!stop_) {
+      connection->poll();
+      for (const auto& packet : connection->take_data()) {
+        std::lock_guard lock(mutex_);
+        if (!stop_ && protocol_.receive(packet.bytes, packet.source)) snapshot_.state = "connected";
+      }
       const auto now = sdk::ControlClock::now();
       std::optional<sdk::Json> packet;
       if (sending) {
@@ -393,32 +355,18 @@ void Controller::media(std::string url, sdk::Json grant,
       if (packet) {
         auto raw = packet->dump();
         sending = Send{
-            room->local_participant().publish_data(
-                {raw.begin(), raw.end()},
-                {true, sdk::remote_control_topic, {grant.at("host_identity")}}),
+            connection->send({raw.begin(), raw.end()}),
             now + 2s};
       }
-      auto frame = frames->read(0ms);
-      if (frame.frame) {
-        // A session room contains only the approved host; still bind each track
-        // to its authenticated participant before presenting decoded frames.
-        auto host = room->participant_by_identity(grant.at("host_identity"));
-        bool owned = false;
-        if (host)
-          for (const auto &track : host->track_publications())
-            if (track.sid() == frame.frame->track_id)
-              owned = true;
-        if (owned) {
-          auto image = convert_frame(*frame.frame);
-          std::lock_guard lock(mutex_);
-          snapshot_.image = std::move(image);
-          ++snapshot_.frames;
-        }
+      if (auto frame = connection->take_frame()) {
+        auto image = convert_frame(*frame);
+        std::lock_guard lock(mutex_);
+        if (!stop_) { snapshot_.image = std::move(image); ++snapshot_.frames; }
       }
       std::this_thread::sleep_for(5ms);
     }
     // Best-effort explicit stop; cancellation/watchdog remain authoritative.
-    if (room->connection_state() == sdk::ConnectionState::connected) {
+    if (connection->connected()) {
       sdk::Json event;
       {
         std::lock_guard lock(mutex_);
@@ -426,19 +374,16 @@ void Controller::media(std::string url, sdk::Json grant,
         event = protocol_.next();
       }
       auto raw = event.dump();
-      auto sent = room->local_participant().publish_data(
-          {raw.begin(), raw.end()},
-          {true, sdk::remote_control_topic, {grant.at("host_identity")}});
+      auto sent = connection->send({raw.begin(), raw.end()});
       sent.wait_for(200ms);
     }
   } catch (const std::exception &e) {
     if (!stop_)
       fail(e.what());
   }
-  if (room) {
-    room->request_stop();
+  if (connection) {
     try {
-      room->wait();
+      connection->close();
     } catch (const std::exception &e) {
       if (!stop_)
         fail(e.what());

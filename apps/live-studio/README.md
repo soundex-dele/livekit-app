@@ -15,11 +15,15 @@ Windows 11 x64 原生直播工作台和浏览器观看端。桌面使用 C++20�
   -Package
 ```
 
-输出为 `livekit-app/out/live-studio-qt6/Release/av_live_studio.exe`。完整客户端根工程选项为 `AV_BUILD_LIVE_STUDIO_DESKTOP=ON`，默认关闭。SDK 选项 `LIVEKIT_BUILD_STUDIO` 需要 RTC、Player 同时启用。
+输出为 `livekit-app/out/live-studio-qt6/Release/av_live_studio.exe`。完整客户端根工程选项为 `AV_BUILD_LIVE_STUDIO_DESKTOP=ON`，默认关闭。SDK 选项 `LIVEKIT_BUILD_STUDIO` 需要 RTC_MEDIA、RTC_NATIVE、RTC_GRAPH_NODES 和 PLAYER。
 
-Studio 使用系统 D3D11、WGC、WASAPI、WIC，文件解码和录制使用 FFmpeg；合成采用 GPU 渲染后读回 I420 供既有 SDK 发布，不是端到端 GPU 零拷贝。硬件设备失败会在工作台显示错误。自动化测试可用 WARP，无需访问桌面采集设备。
+Studio 使用系统 D3D11、WGC、WASAPI、WIC，文件解码和录制使用 FFmpeg；合成采用 GPU 渲染后读回 I420 供独立编码/发布图使用，不是端到端 GPU 零拷贝。硬件设备失败会在工作台显示错误。自动化测试可用 WARP，无需访问桌面采集设备。
 
 ## 媒体流水线
+
+桌面 Session 的节目房间与互动房间各有一个 MediaSession 主管线程，独占 RtcEngine。每个房间分别创建视频和音频发布图：Studio 输出 → MediaInputNode → codec → RtcPublishNode。互动房间为嘉宾轨道创建独立订阅 → codec → 有界输出队列，由主管线程送入 Studio 合成。RoomBackend 仅负责信令和编码媒体收发。
+
+节目输出包含嘉宾，互动输出只包含本地内容，防止循环发送。关闭互动房间会先停止所有接收图，再删除其远端素材；节目发布和本地录制继续。业务线程只读取连接快照，不跨线程操作 Engine。已移除旧 Room/帧流接口和 LiveKit::SDK 链接依赖。
 
 SDK 的 `StudioGraph` 使用 GraphEngine 管理 9 个节点的连接及 init/start/stop/release 生命周期：时钟、素材源、混音、合成、音频输出、视频输出、预览、监听和录制。场景增删在素材源节点内更新设备和播放器，图的输出连接保持稳定。
 

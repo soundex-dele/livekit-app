@@ -1,6 +1,6 @@
 #pragma once
 #include "domain/snapshot.hpp"
-#include <livekit/room.hpp>
+#include <livekit/media.hpp>
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -18,10 +18,8 @@ class Session {
  void run(std::string url,std::string code,sdk::ScreenCaptureDevice display);
  mutable std::mutex mutex_;
  Snapshot snapshot_;
- std::shared_ptr<sdk::Room> room_;
  std::thread worker_;
  std::atomic<bool> stop_{false};
- std::stop_source cancellation_;
  bool fixture_;
  std::function<bool()> permission_;
 };

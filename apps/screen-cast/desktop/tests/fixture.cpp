@@ -1,4 +1,5 @@
 #include "services/session.hpp"
+#include <chrono>
 #include <iostream>
 // Synthetic frames only. Never enumerates or captures the user's displays.
 int main(int argc, char **argv) {

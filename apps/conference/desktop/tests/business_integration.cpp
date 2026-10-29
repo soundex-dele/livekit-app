@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QUuid>
 #include <atomic>
+#include <chrono>
 #include <iostream>
 using namespace std::chrono_literals;
 namespace sdk = livekit::sdk;
@@ -85,69 +86,46 @@ int main(int argc, char **argv) {
     auto hcred = owner.call(prefix + "credentials"),
          gcred = guest.call(prefix + "credentials");
     auto options = [](QJsonObject c) {
-      sdk::RoomOptions o;
-      o.url = c.value("media_url").toString().toStdString();
-      o.token = c.value("media_token").toString().toStdString();
+      demo::SessionOptions o;
+      o.connection.url = c.value("media_url").toString().toStdString();
+      o.connection.token = c.value("media_token").toString().toStdString();
       o.room = c.value("room").toString().toStdString();
       o.audio_playout = false;
       o.microphone = false;
       return o;
     };
-    std::atomic<int> frames{0}, audio{0}, messages{0};
-    sdk::RoomCallback callbacks;
-    callbacks.on_data_received = [&](const auto &data, const auto &params) {
-      if (params.topic == demo::chat_topic && !data.empty())
-        messages++;
-    };
-    sdk::Room host(callbacks), visitor;
-    auto ho = options(hcred);
-    ho.video_frame_handler = [&](const auto &) { ++frames; };
-    ho.audio_frame_stream = std::make_shared<sdk::AudioFrameStream>();
-    host.join_with_token(ho.url, ho.token, ho);
+    demo::Session host, visitor;
+    auto ho = options(hcred); host.start(ho);
     auto go = options(gcred);
-    visitor.join_with_token(go.url, go.token, go);
-    sdk::MediaSpec video;
-    video.demo = true;
-    video.width = 160;
-    video.height = 90;
-    video.fps = 10;
-    auto camera =
-        visitor.local_participant()
-            .publish_track(video, {"合成摄像头", "", sdk::TrackSource::camera})
-            .get();
-    sdk::MediaSpec tone;
-    tone.demo = true;
-    tone.video = false;
-    auto sound =
-        visitor.local_participant()
-            .publish_track(tone, {"合成音频", "", sdk::TrackSource::microphone})
-            .get();
-    until([&] { return frames >= 5; }, "No actual video decoded");
-    until(
-        [&] {
-          auto r = ho.audio_frame_stream->read(10ms);
-          if (r.frame)
-            for (auto sample : r.frame->samples)
-              if (std::abs(int(sample)) > 100)
-                return true;
-          return false;
-        },
-        "No non-silent audio decoded");
-    visitor.local_participant()
-        .publish_data(demo::encode_chat("integration-1", "你好，中文会议消息"),
-                      {true, demo::chat_topic})
-        .get();
-    until([&] { return messages > 0; }, "No reliable chat");
+    sdk::MediaSpec video; video.demo = true; video.width = 160; video.height = 90; video.fps = 10;
+    sdk::MediaSpec tone; tone.demo = true; tone.video = false;
+    go.media = {video, tone}; visitor.start(go);
+    until([&] { return host.snapshot().received_frames >= 5; }, "No actual video decoded");
+    until([&] { return host.snapshot().non_silent_audio_frames > 0; }, "No non-silent audio decoded");
+    auto local_tracks = [&] {
+      const auto snapshot = visitor.snapshot();
+      if (auto p = snapshot.participants.find(snapshot.local_sid); p != snapshot.participants.end()) return p->second.tracks;
+      return std::vector<demo::TrackInfo>{};
+    };
+    auto source_track = [&](demo::rtc::PublicationSource source) {
+      for (const auto& track : local_tracks()) if (track.source == source) return track.sid;
+      return std::string{};
+    };
+    const auto sound = source_track(demo::rtc::PublicationSource::microphone);
+    check(!sound.empty(), "Microphone-role publication missing");
+    check(visitor.send_chat("你好，中文会议消息"), "Cannot enqueue reliable chat");
+    until([&] { return !host.snapshot().chat.messages().empty(); }, "No reliable chat");
     owner.call(prefix + "mute", {{"target", gid}});
     until(
         [&] {
-          for (auto &t : visitor.local_participant().info().tracks)
-            if (t.sid == sound.sid())
+          for (auto &t : local_tracks())
+            if (t.sid == sound)
               return t.muted;
           return false;
         },
         "Host mute not applied");
-    sound.set_muted(false).get();
+    check(visitor.set_muted(sound, false), "Unmute rejected");
+    until([&] { return !visitor.snapshot().changing_video; }, "Unmute pending");
     guest.call(prefix + "share", {{"enabled", true}});
     until(
         [&] {
@@ -160,40 +138,46 @@ int main(int argc, char **argv) {
           return false;
         },
         "Share authorization not applied");
-    auto screen = visitor.local_participant()
-                      .publish_track(video, {"合成共享", "",
-                                             sdk::TrackSource::screen_share})
-                      .get();
-    int before = frames;
-    until([&] { return frames > before + 5; }, "Sharing interrupted video");
+    check(visitor.add_video(video, demo::rtc::PublicationSource::screen), "Screen add rejected");
+    until([&] { return !visitor.snapshot().changing_video && !source_track(demo::rtc::PublicationSource::screen).empty(); }, "Screen publish missing");
+    const auto screen = source_track(demo::rtc::PublicationSource::screen);
+    const auto before = host.snapshot().received_frames;
+    until([&] { return host.snapshot().received_frames > before + 5; }, "Sharing interrupted video");
     guest.call(prefix + "share", {{"enabled", false}});
     until(
         [&] {
-          for (auto &t : visitor.local_participant().info().tracks)
-            if (t.sid == screen.sid())
+          for (auto &t : local_tracks())
+            if (t.sid == screen)
               return false;
           return true;
         },
         "Screen permission not revoked");
-    visitor.disconnect();
-    visitor.wait();
+    check(visitor.snapshot().state == demo::State::Connected && visitor.snapshot().error.empty(),
+          "Screen revoke terminated the conference");
+    const auto continuing = host.snapshot();
+    until([&] { const auto s = host.snapshot(); return s.received_frames > continuing.received_frames + 5 &&
+                  s.non_silent_audio_frames > continuing.non_silent_audio_frames + 5; },
+          "Screen revoke stopped unrelated camera/audio graphs");
+    visitor.stop();
+    until([&] { return visitor.snapshot().finished; }, "Visitor stop");
     gcred = guest.call(prefix + "credentials");
     go = options(gcred);
-    visitor.join_with_token(go.url, go.token, go);
-    check(visitor.connection_state() == sdk::ConnectionState::connected,
+    visitor.start(go);
+    until([&] { return visitor.snapshot().state == demo::State::Connected; }, "Rejoin pending");
+    check(visitor.snapshot().state == demo::State::Connected,
           "Rejoin failed");
     owner.call(prefix + "remove", {{"target", gid}});
     until(
         [&] {
-          return visitor.connection_state() ==
-                 sdk::ConnectionState::disconnected;
+          return visitor.snapshot().finished;
         },
         "Removed member remains connected");
-    visitor.wait();
+
     bool rejected = false;
     try {
-      sdk::Room old;
-      old.join_with_token(go.url, go.token, go);
+      demo::Session old; old.start(go);
+      until([&] { return old.snapshot().finished || old.snapshot().state == demo::State::Connected; }, "Old token pending");
+      rejected = old.snapshot().state == demo::State::Error;
     } catch (...) {
       rejected = true;
     }
@@ -201,14 +185,15 @@ int main(int argc, char **argv) {
     owner.call(prefix + "end");
     until(
         [&] {
-          return host.connection_state() == sdk::ConnectionState::disconnected;
+          return host.snapshot().finished;
         },
         "Ended meeting remains connected");
-    host.wait();
+
     rejected = false;
     try {
-      sdk::Room old;
-      old.join_with_token(ho.url, ho.token, options(hcred));
+      demo::Session old; old.start(options(hcred));
+      until([&] { return old.snapshot().finished || old.snapshot().state == demo::State::Connected; }, "Ended token pending");
+      rejected = old.snapshot().state == demo::State::Error;
     } catch (...) {
       rejected = true;
     }

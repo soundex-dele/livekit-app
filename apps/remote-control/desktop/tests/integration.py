@@ -9,7 +9,7 @@ for name in ('media','business','host','controller'):
 def port():
  with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
 def start(label,command,env=None):
- f=open(out/(label+'.log'),'w');logs.append(f);child=subprocess.Popen(command,stdout=f,stderr=subprocess.STDOUT,env=env);children.append(child);return child
+ f=open(out/(label+'.log'),'w');logs.append(f);child=subprocess.Popen(command,stdout=f,stderr=subprocess.STDOUT,env=env,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0);children.append(child);return child
 def until(check,label,timeout=30):
  end=time.monotonic()+timeout
  while time.monotonic()<end:
@@ -21,12 +21,12 @@ def healthy(url):
  except Exception:return False
 def events(name):
  f=out/(name+'.inputs.jsonl')
- return [json.loads(x) for x in f.read_text().splitlines() if x] if f.exists() else []
+ return [json.loads(x) for x in f.read_text(encoding='utf-8').splitlines() if x] if f.exists() else []
 def connect(name,mode='stop'):
  import re
  host=start(name,[a.host,base,str(out/(name+'.inputs.jsonl'))]);log=out/(name+'.log')
- until(lambda:re.search(r'PAIRING (\d{10})',log.read_text()),'pairing '+name)
- code=re.search(r'PAIRING (\d{10})',log.read_text())[1]
+ until(lambda:re.search(r'PAIRING (\d{10})',log.read_text(encoding='utf-8')),'pairing '+name)
+ code=re.search(r'PAIRING (\d{10})',log.read_text(encoding='utf-8'))[1]
  controller=start(name+'-controller',[a.controller,base,code,str(out/(name+'.json')),mode,name])
  return host,controller
 try:
@@ -38,11 +38,12 @@ try:
  until(lambda:healthy(base+'/healthz') and healthy(f'http://127.0.0.1:{mp}/healthz'),'services')
  ha,ca=connect('session-a');hb,cb=connect('session-b')
  for name,host,controller in [('session-a',ha,ca),('session-b',hb,cb)]:
-  until(lambda:controller.poll() is not None,name+' controller',45);assert controller.returncode==0,(out/(name+'-controller.log')).read_text()
+  until(lambda:controller.poll() is not None,name+' controller',45);assert controller.returncode==0,(out/(name+'-controller.log')).read_text(encoding='utf-8')
   until(lambda:host.poll() is not None,name+' host stop',10)
+  assert host.returncode==0,(out/(name+'.log')).read_text(encoding='utf-8')
   ev=events(name);texts=[e for e in ev if e['type']=='text'];assert len(texts)==1 and texts[0]['text']=='你好，Qt 远程协助 😀\n第二行\n'+name
   assert any(e['code']=='ShiftLeft' and e['down'] for e in ev) and any(e['code']=='ShiftLeft' and not e['down'] for e in ev)
-  evidence['scenarios'].append({'name':name,**json.loads((out/(name+'.json')).read_text())})
+  evidence['scenarios'].append({'name':name,**json.loads((out/(name+'.json')).read_text(encoding='utf-8'))})
  host,controller=connect('controller-exit','wait-failure')
  until(lambda:any(e['code']=='ControlLeft' and e['down'] for e in events('controller-exit')),'held key before process exit')
  controller.terminate();controller.wait(timeout=10)
@@ -50,7 +51,7 @@ try:
  until(lambda:host.poll() is not None,'process exit stops host',15)
  evidence['scenarios'].append({'name':'controller-process-exit','released':True,'host_exited':True})
  host,controller=connect('business-loss','wait-failure')
- until(lambda:'HOLDING' in (out/'business-loss-controller.log').read_text(),'held key before failure')
+ until(lambda:'HOLDING' in (out/'business-loss-controller.log').read_text(encoding='utf-8'),'held key before failure')
  until(lambda:any(e['code']=='ControlLeft' and e['down'] for e in events('business-loss')),'key-down recorded')
  business.terminate();business.wait(timeout=10)
  until(lambda:controller.poll() is not None,'controller notices business failure',20);assert controller.returncode==0
@@ -63,4 +64,4 @@ finally:
    try:child.wait(timeout=10)
    except subprocess.TimeoutExpired:child.kill();child.wait()
  for f in logs:f.close()
- (out/'evidence.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2))
+ (out/'evidence.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf-8')

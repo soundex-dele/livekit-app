@@ -1,4 +1,5 @@
 #include "session.hpp"
+#include <livekit/api.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -16,8 +17,8 @@ int main() {
     const std::string name = "conference-chat-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     struct Cleanup { sdk::LiveKitAPI& api; std::string room; ~Cleanup() { try { api.room().delete_room(room); api.room().delete_room(room + "-other"); } catch (...) {} } } cleanup{api, name};
     auto options = [&](const std::string& who, const std::string& room) {
-      sdk::RoomOptions o; o.url = env("LIVEKIT_URL"); o.room = room; o.audio_playout = false;
-      o.token = api.room().create_token().set_identity(who).set_name(who)
+      demo::SessionOptions o; o.connection.url = env("LIVEKIT_URL"); o.room = room; o.audio_playout = false;
+      o.connection.token = api.room().create_token().set_identity(who).set_name(who)
         .set_video_grant({{"roomJoin", true}, {"room", room}, {"canPublish", false}, {"canPublishData", true}, {"canSubscribe", true}}).to_jwt();
       return o;
     };

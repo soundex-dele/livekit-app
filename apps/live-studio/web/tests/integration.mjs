@@ -23,7 +23,7 @@ function passed(name){report.checks.push(name);console.log('PASS',name);}
 const sdkPath=resolve(here,'../node_modules/livekit-client/dist/livekit-client.umd.js');
 async function publisher(name){
  if(process.env.STUDIO_NATIVE==='1'){
-  const child=launch(resolve(root,'livekit-app/out/live-studio-qt6/Release/studio_publisher_fixture.exe'),['--url',base,'--name',name,'--duration',String(Number(process.env.STUDIO_DURATION_SECONDS||180)+300),'--settings',resolve(output,name+'-settings'),'--record',resolve(output,name+'.mp4')],name,{STUDIO_FIXTURE_PASSWORD:password});
+  const child=launch(process.env.STUDIO_NATIVE_FIXTURE||resolve(root,'livekit-app/out/live-studio-qt6/Release/studio_publisher_fixture.exe'),['--software','--url',base,'--name',name,'--duration',String(Number(process.env.STUDIO_DURATION_SECONDS||180)+300),'--settings',resolve(output,name+'-settings'),'--record',resolve(output,name+'.mp4')],name,{STUDIO_FIXTURE_PASSWORD:password});
   const entry=children.at(-1);
   const ready=await until(()=>{for(const line of entry.log().split('\n')){try{const value=JSON.parse(line);if(value.event==='ready')return value;}catch{}}if(child.exitCode!==null)throw new Error(entry.log());},'native publisher '+name,60000);
   const account=await api('/api/v1/auth/login',{name,password});return {token:account.session_token,account,broadcast:{id:ready.broadcast,room:ready.room},prefix:`/api/v1/live-studio/broadcasts/${ready.broadcast}/`,child};
@@ -64,7 +64,7 @@ async function capacity(){
 }
 try{
  launch(resolve(root,'livekit-cpp/out/windows-x64/Release/livekit-server.exe'),['--config',resolve(output,'media.json')],'media',{LIVE_STUDIO_ADMISSION_SECRET:admission,LIVE_STUDIO_ADMISSION_PORT:String(apiPort)});
- launch(resolve(root,'livekit-server/out/live-studio/business-api.exe'),['-listen',`127.0.0.1:${apiPort}`,'-db',resolve(output,'studio.sqlite'),'-live-studio','-live-studio-web',resolve(here,'../dist'),'-remote-control-web','','-screen-cast-web','','-media-api',media,'-media-url',`ws://127.0.0.1:${mediaPort}`],'business',{LIVEKIT_API_KEY:'studio',LIVEKIT_API_SECRET:secret,LIVE_STUDIO_ADMISSION_SECRET:admission});
+ launch(process.env.STUDIO_BUSINESS_SERVER||resolve(root,'livekit-server/out/live-studio/business-api.exe'),['-listen',`127.0.0.1:${apiPort}`,'-db',resolve(output,'studio.sqlite'),'-live-studio','-live-studio-web',resolve(here,'../dist'),'-remote-control-web','','-screen-cast-web','','-media-api',media,'-media-url',`ws://127.0.0.1:${mediaPort}`],'business',{LIVEKIT_API_KEY:'studio',LIVEKIT_API_SECRET:secret,LIVE_STUDIO_ADMISSION_SECRET:admission});
  await until(async()=> (await fetch(base+'/healthz')).ok,'business service');await until(async()=> (await fetch(media+'/healthz')).ok,'media service');
  browser=await chromium.launch({channel:process.env.STUDIO_BROWSER_CHANNEL||'chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows']});
  if(process.env.STUDIO_CAPACITY==='1'){await capacity();report.result='passed';}else{
@@ -88,6 +88,7 @@ try{
  await viewer.locator('#request-guest').click();const login=await api('/api/v1/auth/login',{name:'viewer_1',password});await api(a.prefix+'guest/approve',{target:login.user.id},a.token);await until(()=>viewer.locator('#guest-join').count().then(n=>n===1),'guest approval');await viewer.locator('#guest-join').click();await until(()=>viewer.locator('#guest-status').textContent().then(t=>t.includes('连麦中')),'real guest publication',45000);passed('approved guest publishes camera/microphone fixtures');
  if(process.env.STUDIO_NATIVE==='1'){
   await until(()=>viewer.evaluate(()=>{const v=document.querySelector('#video-stage video'),c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.drawImage(v,v.videoWidth*.75,v.videoHeight*.8,1,1,0,0,1,1);const p=x.getImageData(0,0,1,1).data;return Math.abs(p[0]-25)+Math.abs(p[1]-38)+Math.abs(p[2]-76)>65;}),'guest appears in native program composition',30000);passed('native host composites guest return video');
+  await until(()=>children.find(item=>item.child===a.child).log().split('\n').some(line=>{try{const row=JSON.parse(line);return row.event==='stats'&&row.stage_video>=3&&row.stage_audio>=3&&row.stage_subscriptions>=2&&!row.session_error;}catch{return false;}}),'native stage decodes independent video and audio tracks',30000);passed('native stage delivers decoded video and PCM to Studio');
  }
 
  const stageGrant=await api(a.prefix+'connect',{stage:true},login.session_token);await api(a.prefix+'guest/end',{target:login.user.id},a.token);const denied=await fetch(media+'/rtc/validate?access_token='+encodeURIComponent(stageGrant.media_token));assert.equal(denied.status,401);passed('SFU rejects revoked stage grant');

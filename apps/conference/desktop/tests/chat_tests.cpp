@@ -10,7 +10,7 @@ int main() {
     }
     std::string chinese; for (int i = 0; i < 2000; ++i) chinese += "中";
     validate_chat_text(chinese); validate_chat_text("你好\n第二行 😀");
-    ChatLog log; livekit::sdk::DataReceiveParams source{"alice", chat_topic, true};
+    ChatLog log; demo::ChatSource source{"alice", chat_topic, true};
     auto bytes = encode_chat("one", "你好\n第二行 😀");
     check(log.receive(bytes, source, "爱丽丝", "me"), "Chinese receive");
     check(log.messages().back().sender == "alice" && log.messages().back().name == "爱丽丝", "Sender identity mapping");
