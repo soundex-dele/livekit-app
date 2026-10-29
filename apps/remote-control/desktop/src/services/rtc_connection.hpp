@@ -1,5 +1,5 @@
 #pragma once
-#include <livekit/rtc/media_engine.hpp>
+#include <livekit/rtc/engine.hpp>
 #include <livekit/remote_control.hpp>
 #include <atomic>
 #include <mutex>
@@ -51,7 +51,7 @@ class RtcConnection {
 
   bool owned(const std::string& sid) const;
   void subscribe(const rtc::TrackDescriptor&);
-  std::unique_ptr<rtc::engine::RtcMediaEngine> engine_;
+  std::unique_ptr<rtc::engine::RtcEngine> engine_;
   std::string peer_, peer_sid_;
   const std::atomic<bool>& stop_;
   bool receive_video_, closed_ = false;

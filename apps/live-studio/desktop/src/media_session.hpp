@@ -1,5 +1,5 @@
 #pragma once
-#include <livekit/rtc/media_engine.hpp>
+#include <livekit/rtc/engine.hpp>
 #include <livekit/studio.hpp>
 #include <atomic>
 #include <functional>

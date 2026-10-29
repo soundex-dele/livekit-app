@@ -42,7 +42,7 @@ void MediaSession::run(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> st
                        bool interaction, const std::atomic<bool>& closing, Statistics stats,
                        std::promise<void> started) {
   bool announced = false;
-  std::unique_ptr<rtc::engine::RtcMediaEngine> engine;
+  std::unique_ptr<rtc::engine::RtcEngine> engine;
   std::map<rtc::TrackId, std::shared_ptr<Mailbox>> mailboxes;
   std::map<rtc::TrackId, std::future<rtc::TrackId>> pending;
   auto cancelled = [&] { return stop_.load() || closing.load(); };
@@ -58,7 +58,7 @@ void MediaSession::run(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> st
     return future.get();
   };
   try {
-    engine = rtc::engine::create_livekit_media_engine();
+    engine = rtc::engine::create_livekit_engine({});
     auto joining = engine->join(options);
     await(joining);
     const auto canvas = studio->options();
@@ -102,7 +102,7 @@ void MediaSession::run(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> st
       engine->poll();
       if (auto failure = engine->next_failure())
         throw std::runtime_error(failure->message);
-      while (auto event = engine->room().next_event(0ms)) {
+      while (auto event = engine->next_event(0ms)) {
         if (event->kind == rtc::RoomEventKind::closed) {
           ended = true;
           break;

@@ -6,7 +6,7 @@ using namespace std::chrono_literals;
 
 RtcConnection::RtcConnection(std::string url, std::string token, std::string peer,
                              bool receive_video, const std::atomic<bool>& stop)
-    : engine_(rtc::engine::create_livekit_media_engine()),
+    : engine_(rtc::engine::create_livekit_engine({})),
       peer_(std::move(peer)),
       stop_(stop),
       receive_video_(receive_video) {
@@ -100,7 +100,7 @@ void RtcConnection::subscribe(const rtc::TrackDescriptor& d) {
 }
 
 void RtcConnection::poll() {
-  while (auto event = engine_->room().next_event(0ms)) {
+  while (auto event = engine_->next_event(0ms)) {
     if (event->kind == rtc::RoomEventKind::closed)
       throw ConnectionEnded("Media connection ended");
     if (event->kind == rtc::RoomEventKind::failed ||

@@ -1,5 +1,5 @@
 #include "session.hpp"
-#include <livekit/rtc/media_engine.hpp>
+#include <livekit/rtc/engine.hpp>
 #include <algorithm>
 #include <random>
 
@@ -81,7 +81,7 @@ void Session::start(SessionOptions options) {
       };
       try {
         std::map<TrackId, std::shared_ptr<Track>> tracks;
-        auto engine = engine::create_livekit_media_engine();
+        auto engine = engine::create_livekit_engine({});
         // Only the supervisor owns engine control. Codec callbacks only replace an owned frame.
         const auto await = [&](auto& future) {
           while (future.wait_for(0ms) != std::future_status::ready) {
@@ -203,7 +203,7 @@ void Session::start(SessionOptions options) {
         std::future<void> chat_send;
         std::string sending_id;
         while (!stop.stop_requested()) {
-          while (auto event = engine->room().next_event(0ms)) {
+          while (auto event = engine->next_event(0ms)) {
             if (event->kind == RoomEventKind::remote_track_added && event->descriptor)
               subscribe(*event->descriptor);
             else if (event->kind == RoomEventKind::track_removed) {

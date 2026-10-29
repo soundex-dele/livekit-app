@@ -1,6 +1,6 @@
 #include "services/session.hpp"
 #include <av/http.hpp>
-#include <livekit/rtc/media_engine.hpp>
+#include <livekit/rtc/engine.hpp>
 #include "platform/permission.hpp"
 #include <algorithm>
 #include <set>
@@ -49,7 +49,7 @@ void Session::start(std::string url, std::string code, sdk::ScreenCaptureDevice 
 
 void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice display) {
   std::string id, key;
-  std::unique_ptr<rtc::engine::RtcMediaEngine> engine;
+  std::unique_ptr<rtc::engine::RtcEngine> engine;
   const auto setState = [&](std::string state) {
     std::lock_guard lock(mutex_);
     snapshot_.state = std::move(state);
@@ -79,7 +79,7 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
         auto conn =
             av::request(url, "/api/v1/screen-cast/sessions/" + id + "/connect", key, &empty);
         if (!stop_) {
-          engine = rtc::engine::create_livekit_media_engine();
+          engine = rtc::engine::create_livekit_engine({});
           const auto await = [&](auto& future) {
             while (future.wait_for(0ms) != std::future_status::ready) {
               if (stop_)
@@ -135,7 +135,7 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
           auto next = std::chrono::steady_clock::now();
           setState("paired");
           while (!stop_) {
-            while (auto event = engine->room().next_event(0ms)) {
+            while (auto event = engine->next_event(0ms)) {
               if (event->kind == rtc::RoomEventKind::closed) {
                 stop_ = true;
                 break;
