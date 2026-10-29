@@ -21,7 +21,7 @@ Studio 使用系统 D3D11、WGC、WASAPI、WIC，文件解码和录制使用 FFm
 
 ## 媒体流水线
 
-桌面 Session 的节目房间与互动房间各有一个 MediaSession 主管线程，独占 RtcEngine。每个房间分别创建视频和音频发布图：Studio 输出 → MediaInputNode → codec → RtcPublishNode。互动房间为嘉宾轨道创建独立订阅 → codec → 有界输出队列，由主管线程送入 Studio 合成。RoomBackend 仅负责信令和编码媒体收发。
+桌面 Session 的节目房间与互动房间各有一个 MediaSession 主管线程，独占 RtcEngine。每个房间分别创建视频和音频发布图：Studio 输出 → MediaInputNode → codec → RtcPublishNode。互动房间为嘉宾轨道创建独立订阅 → codec → 有界输出队列，由主管线程送入 Studio 合成。RoomSession 仅负责信令和编码媒体收发。
 
 节目输出包含嘉宾，互动输出只包含本地内容，防止循环发送。关闭互动房间会先停止所有接收图，再删除其远端素材；节目发布和本地录制继续。业务线程只读取连接快照，不跨线程操作 Engine。已移除旧 Room/帧流接口和 LiveKit::SDK 链接依赖。
 
