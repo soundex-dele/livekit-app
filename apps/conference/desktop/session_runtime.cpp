@@ -12,7 +12,7 @@ using namespace std::chrono_literals;
 struct Track {
   TrackDescriptor descriptor;
   bool publication = false, ready = false;
-  std::future<TrackId> pending;
+  livekit::sdk::AsyncResult<TrackId> pending;
   std::shared_ptr<engine::MediaTrack> media;
 
   std::string sid() const {
@@ -202,6 +202,21 @@ void Session::start(SessionOptions options) {
           tracks.emplace(descriptor.id, std::move(track));
         };
         auto services = engine->room().services();
+        services->set_event_handler([this, room = engine->room()](const DataEvent& event) {
+          const auto* message = std::get_if<ReceivedData>(&event.value);
+          if (!message || message->topic != chat_topic) { return; }
+          const auto state = room.snapshot().session;
+          if (!state) { return; }
+          const auto sender = std::find_if(state->remote.begin(), state->remote.end(),
+              [&](const auto& row) { return row.second.identity == event.sender_identity; });
+          if (sender == state->remote.end()) { return; }
+          std::lock_guard lock(mutex_);
+          if (data_.state != State::Disconnecting) {
+            data_.chat.receive(message->bytes,
+                {event.sender_identity, message->topic, event.reliable},
+                sender->second.name, state->local.identity);
+          }
+        });
         std::future<void> chat_send;
         std::string sending_id;
         while (!stop.stop_requested()) {
@@ -258,24 +273,6 @@ void Session::start(SessionOptions options) {
               track->pending.get();
               track->ready = true;
             }
-          while (auto event = services->next_event(0ms)) {
-            const auto* message = std::get_if<ReceivedData>(&event->value);
-            if (!message || message->topic != chat_topic)
-              continue;
-            const auto state = engine->room().snapshot().session;
-            if (!state)
-              continue;
-            const auto sender = std::find_if(
-                state->remote.begin(), state->remote.end(),
-                [&](const auto& row) { return row.second.identity == event->sender_identity; });
-            if (sender == state->remote.end())
-              continue;
-            std::lock_guard lock(mutex_);
-            if (data_.state != State::Disconnecting)
-              data_.chat.receive(message->bytes,
-                                 {event->sender_identity, message->topic, event->reliable},
-                                 sender->second.name, state->local.identity);
-          }
           if (chat_send.valid() && chat_send.wait_for(0ms) == std::future_status::ready) {
             bool confirmed = true;
             try {

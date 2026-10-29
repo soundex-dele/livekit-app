@@ -46,7 +46,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
   bool announced = false;
   std::unique_ptr<rtc::engine::RtcEngine> engine;
   std::map<rtc::TrackId, std::shared_ptr<Mailbox>> mailboxes;
-  std::map<rtc::TrackId, std::future<rtc::TrackId>> pending;
+  std::map<rtc::TrackId, livekit::sdk::AsyncResult<rtc::TrackId>> pending;
   auto cancelled = [&] { return stop_.load() || closing.load(); };
   auto await = [&](auto& future) {
     while (future.wait_for(0ms) != std::future_status::ready) {

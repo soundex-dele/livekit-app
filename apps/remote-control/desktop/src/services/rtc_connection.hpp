@@ -1,5 +1,6 @@
 #pragma once
 #include "rtc_event_mailbox.hpp"
+#include "data_event_mailbox.hpp"
 #include <livekit/rtc/engine.hpp>
 #include <livekit/remote_control.hpp>
 #include <atomic>
@@ -37,7 +38,7 @@ class RtcConnection {
 
  private:
   template <class T>
-  T await(std::future<T>& future) {
+  T await(sdk::AsyncResult<T>& future) {
     using namespace std::chrono_literals;
     while (future.wait_for(0ms) != std::future_status::ready) {
       if (stop_)
@@ -54,11 +55,12 @@ class RtcConnection {
   void subscribe(const rtc::TrackDescriptor&);
   std::unique_ptr<rtc::engine::RtcEngine> engine_;
   sdk::app_support::RtcEventMailbox engine_events_;
+  sdk::app_support::DataEventMailbox data_events_;
   std::string peer_, peer_sid_;
   const std::atomic<bool>& stop_;
   bool receive_video_, closed_ = false;
   std::map<rtc::TrackId, rtc::TrackDescriptor> discovered_;
-  std::map<rtc::TrackId, std::future<rtc::TrackId>> subscriptions_;
+  std::map<rtc::TrackId, sdk::AsyncResult<rtc::TrackId>> subscriptions_;
   std::mutex frames_mutex_;
   std::map<rtc::TrackId, std::shared_ptr<const sdk::VideoFrame>> frames_;
 };

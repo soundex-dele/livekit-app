@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QTimer>
 #include <optional>
+#include <mutex>
 
 namespace player_demo {
 namespace sdk = livekit::sdk;
@@ -72,15 +73,33 @@ class Controller final : public QObject {
  private:
   void update();
   void startOpen(const QString&, qint64);
-  void command(Operation, std::future<void>);
+  void command(Operation, sdk::AsyncResult<void>);
   void resetOutput(bool clearImage);
   void reportFailure(const QString&);
   sdk::Player player_;
   std::unique_ptr<AudioOutput> audio_;
   QTimer timer_;
   Operation operation_ = Operation::none;
-  std::future<sdk::PlayerMediaInfo> opening_;
-  std::future<void> pending_;
+  sdk::AsyncResult<sdk::PlayerMediaInfo> opening_;
+  sdk::AsyncResult<void> pending_;
+
+  struct DispatchState {
+    std::mutex mutex;
+    Controller* owner = nullptr;
+  };
+
+  struct OutputState {
+    std::mutex mutex;
+    std::optional<sdk::media::VideoFrame> video;
+    std::optional<sdk::media::AudioFrame> audio;
+    bool requested = false;
+  };
+
+  std::shared_ptr<DispatchState> dispatch_state_ = std::make_shared<DispatchState>();
+  std::shared_ptr<OutputState> output_ = std::make_shared<OutputState>();
+  std::function<void(std::function<void()>)> dispatch_;
+  uint64_t operation_serial_ = 0;
+  bool completion_ready_ = false;
   QString path_, error_;
   QImage image_;
   std::optional<std::pair<QString, qint64>> nextOpen_;

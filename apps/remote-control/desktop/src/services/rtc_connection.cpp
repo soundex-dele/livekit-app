@@ -9,6 +9,7 @@ RtcConnection::RtcConnection(std::string url, std::string token, std::string pee
                              bool receive_video, const std::atomic<bool>& stop)
     : engine_(rtc::engine::create_livekit_engine({})),
       engine_events_(*engine_),
+      data_events_(engine_->room().services()),
       peer_(std::move(peer)),
       stop_(stop),
       receive_video_(receive_video) {
@@ -153,7 +154,7 @@ void RtcConnection::poll() {
 std::vector<RtcConnection::Packet> RtcConnection::take_data() {
   std::vector<Packet> packets;
   for (size_t count = 0; count < 256; ++count) {
-    auto event = engine_->room().services()->next_event(0ms);
+    auto event = data_events_.take_event(0ms);
     if (!event)
       break;
     if (const auto* error = std::get_if<rtc::DataServiceError>(&event->value))

@@ -6,6 +6,26 @@ using namespace std::chrono_literals;
 
 Controller::Controller(std::unique_ptr<AudioOutput> audio, QObject* parent)
     : QObject(parent), audio_(audio ? std::move(audio) : std::make_unique<QtAudioOutput>()) {
+  dispatch_state_->owner = this;
+  dispatch_ = [state = dispatch_state_](std::function<void()> task) {
+    std::lock_guard lock(state->mutex);
+    if (!state->owner ||
+        !QMetaObject::invokeMethod(state->owner, std::move(task), Qt::QueuedConnection)) {
+      throw sdk::SDKError(sdk::ErrorDomain::lifecycle, sdk::ErrorCode::cancelled,
+                          "Player controller was destroyed");
+    }
+  };
+  sdk::PlayerCallbacks callbacks;
+  callbacks.video = [output = output_](const auto& frame) {
+    std::lock_guard lock(output->mutex);
+    output->video = frame;
+  };
+  callbacks.audio = [output = output_](const auto& frame) {
+    std::lock_guard lock(output->mutex);
+    output->audio = frame;
+    output->requested = false;
+  };
+  player_.set_callbacks(std::move(callbacks), {sdk::PlayerAudioDelivery::on_demand});
   timer_.setInterval(8);
   timer_.setTimerType(Qt::PreciseTimer);
   connect(&timer_, &QTimer::timeout, this, &Controller::update);
@@ -14,20 +34,46 @@ Controller::Controller(std::unique_ptr<AudioOutput> audio, QObject* parent)
 
 Controller::~Controller() {
   timer_.stop();
+  {
+    std::lock_guard lock(dispatch_state_->mutex);
+    dispatch_state_->owner = nullptr;
+  }
+  player_.set_callbacks({});
   player_.cancel_pending_io();
 }
 
 void Controller::resetOutput(bool clearImage) {
   audio_->reset();
+  {
+    // Preserve a new-generation paused preview which may arrive before the
+    // control completion reaches Qt. Old-generation frames never reach devices.
+    const auto generation = player_.snapshot().generation;
+    std::lock_guard lock(output_->mutex);
+    if (output_->video && output_->video->generation != generation) {
+      output_->video.reset();
+    }
+    if (output_->audio && output_->audio->generation != generation) {
+      output_->audio.reset();
+    }
+  }
   if (clearImage) {
     image_ = {};
     emit frameChanged(image_);
   }
 }
 
-void Controller::command(Operation operation, std::future<void> pending) {
+void Controller::command(Operation operation, sdk::AsyncResult<void> pending) {
   operation_ = operation;
-  pending_ = std::move(pending);
+  completion_ready_ = false;
+  const auto serial = ++operation_serial_;
+  std::move(pending).then(dispatch_, [this, serial](sdk::AsyncResult<void> ready) {
+    if (serial != operation_serial_) {
+      return;
+    }
+    pending_ = std::move(ready);
+    completion_ready_ = true;
+    update();
+  });
 }
 
 void Controller::open(const QString& path, qint64 resumeUs) {
@@ -54,8 +100,18 @@ void Controller::startOpen(const QString& path, qint64 resumeUs) {
   failureEmitted_ = false;
   endEmitted_ = false;
   resumeUs_ = std::max<qint64>(0, resumeUs);
-  opening_ = player_.open(path.toUtf8().toStdString());
   operation_ = Operation::open;
+  completion_ready_ = false;
+  const auto serial = ++operation_serial_;
+  player_.open(path.toUtf8().toStdString())
+      .then(dispatch_, [this, serial](sdk::AsyncResult<sdk::PlayerMediaInfo> ready) {
+        if (serial != operation_serial_) {
+          return;
+        }
+        opening_ = std::move(ready);
+        completion_ready_ = true;
+        update();
+      });
   emit changed();
 }
 
@@ -123,7 +179,9 @@ bool Controller::loadSubtitles(const QString& path) {
 }
 
 bool Controller::drained() const {
-  return !busy() && snapshot().state == sdk::PlayerState::ended && audio_->drained();
+  std::lock_guard lock(output_->mutex);
+  return !busy() && snapshot().state == sdk::PlayerState::ended && !output_->audio &&
+         audio_->drained();
 }
 
 void Controller::reportFailure(const QString& message) {
@@ -144,8 +202,13 @@ void Controller::update() {
   if (finished_)
     return;
   try {
-    if (operation_ == Operation::open && opening_.wait_for(0ms) == std::future_status::ready) {
+    if (operation_ == Operation::open && completion_ready_) {
+      completion_ready_ = false;
       const auto media = opening_.get();
+      {
+        std::lock_guard lock(output_->mutex);
+        output_->requested = false;
+      }
       operation_ = Operation::none;
       if (!nextOpen_) {
         generation_ = snapshot().generation;
@@ -158,11 +221,17 @@ void Controller::update() {
         autoplay_ = !stopRequested_;
         emit opened();
       }
-    } else if (busy() && operation_ != Operation::open &&
-               pending_.wait_for(0ms) == std::future_status::ready) {
+    } else if (busy() && operation_ != Operation::open && completion_ready_) {
+      completion_ready_ = false;
       const auto completed = operation_;
       pending_.get();
       operation_ = Operation::none;
+      if (completed == Operation::pause || completed == Operation::seek ||
+          completed == Operation::stop || completed == Operation::recover ||
+          completed == Operation::close) {
+        std::lock_guard lock(output_->mutex);
+        output_->requested = false;
+      }
       if (completed == Operation::close) {
         finished_ = true;
         timer_.stop();
@@ -210,21 +279,31 @@ void Controller::update() {
           generation_ = state.generation;
         }
         audio_->pump();
-        // A finite budget also keeps silent/no-device output responsive.
-        for (int i = 0; i < 64 && audio_->canAccept(); ++i) {
-          auto frame = player_.poll_audio();
-          if (!frame)
-            break;
-          if (frame->generation == generation_)
-            audio_->enqueue(*frame);
-        }
+        std::optional<sdk::media::AudioFrame> audio;
         std::optional<sdk::media::VideoFrame> latest;
-        for (int i = 0; i < 8; ++i) {
-          auto frame = player_.poll_video();
-          if (!frame)
-            break;
-          if (frame->generation == generation_)
-            latest = std::move(frame);
+        {
+          std::lock_guard lock(output_->mutex);
+          if (output_->audio && output_->audio->generation != generation_) {
+            output_->audio.reset();
+          }
+          if (output_->video && output_->video->generation != generation_) {
+            output_->video.reset();
+          }
+          if (audio_->canAccept()) {
+            audio = std::move(output_->audio);
+            output_->audio.reset();
+          }
+          latest = std::move(output_->video);
+          output_->video.reset();
+        }
+        if (audio) {
+          audio_->enqueue(*audio);
+        }
+        if (state.state == sdk::PlayerState::playing && audio_->canAccept()) {
+          std::lock_guard lock(output_->mutex);
+          if (!output_->audio && !output_->requested) {
+            output_->requested = player_.request_audio(generation_);
+          }
         }
         if (latest && latest->rgba) {
           // A detached QImage survives SDK generation changes and retained UI paints.
