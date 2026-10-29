@@ -1,3 +1,4 @@
+#include "livekit/rtc/livekit.hpp"
 #include "session.hpp"
 #include <av/http.hpp>
 #include "platform.hpp"
@@ -197,7 +198,7 @@ void Session::set_audio(sdk::StudioAudioSettings a) {
 void Session::connect(bool interaction) {
   Json args{{"stage", interaction}};
   auto credentials = request(prefix + "broadcasts/" + broadcast_ + "/connect", &args);
-  sdk::rtc::RoomOptions options;
+  sdk::rtc::LiveKitRoomOptions options;
   options.url = credentials.at("media_url");
   options.token = credentials.at("media_token");
   options.connect_timeout = 10;

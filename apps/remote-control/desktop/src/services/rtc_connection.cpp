@@ -1,3 +1,4 @@
+#include "livekit/rtc/livekit.hpp"
 #include "services/rtc_connection.hpp"
 #include <algorithm>
 
@@ -7,10 +8,11 @@ using namespace std::chrono_literals;
 RtcConnection::RtcConnection(std::string url, std::string token, std::string peer,
                              bool receive_video, const std::atomic<bool>& stop)
     : engine_(rtc::engine::create_livekit_engine({})),
+      engine_events_(*engine_),
       peer_(std::move(peer)),
       stop_(stop),
       receive_video_(receive_video) {
-  rtc::RoomOptions options;
+  rtc::LiveKitRoomOptions options;
   options.url = std::move(url);
   options.token = token;
   options.connect_timeout = 10;
@@ -100,7 +102,7 @@ void RtcConnection::subscribe(const rtc::TrackDescriptor& d) {
 }
 
 void RtcConnection::poll() {
-  while (auto event = engine_->next_event(0ms)) {
+  while (auto event = engine_events_.take_event(0ms)) {
     if (event->kind == rtc::RoomEventKind::closed)
       throw ConnectionEnded("Media connection ended");
     if (event->kind == rtc::RoomEventKind::failed ||
@@ -140,8 +142,8 @@ void RtcConnection::poll() {
   for (const auto& [id, d] : discovered_)
     if (!subscriptions_.contains(id) && owned(d.remote_sid))
       subscribe(d);
-  engine_->poll();
-  if (auto failure = engine_->next_failure())
+
+  if (auto failure = engine_events_.take_failure())
     throw std::runtime_error(failure->message);
   for (auto& [id, pending] : subscriptions_)
     if (pending.valid() && pending.wait_for(0ms) == std::future_status::ready)

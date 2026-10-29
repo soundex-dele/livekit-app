@@ -1,3 +1,5 @@
+#include "rtc_event_mailbox.hpp"
+#include "livekit/rtc/livekit.hpp"
 #include "media_session.hpp"
 #include <deque>
 
@@ -14,7 +16,7 @@ struct Mailbox {
 };
 }  // namespace
 
-MediaSession::MediaSession(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> studio,
+MediaSession::MediaSession(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Studio> studio,
                            bool interaction, const std::atomic<bool>& closing, Statistics stats) {
   std::promise<void> started;
   auto ready = started.get_future();
@@ -38,7 +40,7 @@ std::string MediaSession::error() const {
   return error_;
 }
 
-void MediaSession::run(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> studio,
+void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Studio> studio,
                        bool interaction, const std::atomic<bool>& closing, Statistics stats,
                        std::promise<void> started) {
   bool announced = false;
@@ -50,7 +52,7 @@ void MediaSession::run(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> st
     while (future.wait_for(0ms) != std::future_status::ready) {
       if (cancelled())
         throw std::runtime_error("Studio media connection cancelled");
-      engine->poll();
+
       std::this_thread::sleep_for(5ms);
     }
     if (cancelled())
@@ -59,6 +61,7 @@ void MediaSession::run(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> st
   };
   try {
     engine = rtc::engine::create_livekit_engine({});
+    livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
     auto joining = engine->join(options);
     await(joining);
     const auto canvas = studio->options();
@@ -99,10 +102,9 @@ void MediaSession::run(rtc::RoomOptions options, std::shared_ptr<sdk::Studio> st
     announced = true;
     bool ended = false;
     while (!cancelled() && !ended) {
-      engine->poll();
-      if (auto failure = engine->next_failure())
+      if (auto failure = engine_events.take_failure())
         throw std::runtime_error(failure->message);
-      while (auto event = engine->next_event(0ms)) {
+      while (auto event = engine_events.take_event(0ms)) {
         if (event->kind == rtc::RoomEventKind::closed) {
           ended = true;
           break;

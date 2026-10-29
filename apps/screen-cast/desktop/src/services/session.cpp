@@ -1,3 +1,5 @@
+#include "rtc_event_mailbox.hpp"
+#include "livekit/rtc/livekit.hpp"
 #include "services/session.hpp"
 #include <av/http.hpp>
 #include <livekit/rtc/engine.hpp>
@@ -80,18 +82,19 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
             av::request(url, "/api/v1/screen-cast/sessions/" + id + "/connect", key, &empty);
         if (!stop_) {
           engine = rtc::engine::create_livekit_engine({});
+          livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
           const auto await = [&](auto& future) {
             while (future.wait_for(0ms) != std::future_status::ready) {
               if (stop_)
                 throw std::runtime_error("Screen cast cancelled");
-              engine->poll();
+
               std::this_thread::sleep_for(5ms);
             }
             if (stop_)
               throw std::runtime_error("Screen cast cancelled");
             return future.get();
           };
-          rtc::RoomOptions options;
+          rtc::LiveKitRoomOptions options;
           options.url = conn.at("media_url");
           options.token = conn.at("media_token");
           options.connect_timeout = 10;
@@ -135,7 +138,7 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
           auto next = std::chrono::steady_clock::now();
           setState("paired");
           while (!stop_) {
-            while (auto event = engine->next_event(0ms)) {
+            while (auto event = engine_events.take_event(0ms)) {
               if (event->kind == rtc::RoomEventKind::closed) {
                 stop_ = true;
                 break;
@@ -146,8 +149,8 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
             }
             if (stop_)
               break;
-            engine->poll();
-            if (auto failure = engine->next_failure())
+
+            if (auto failure = engine_events.take_failure())
               throw std::runtime_error(failure->message);
             if (auto state = engine->room().snapshot().session) {
               std::set<std::string> current;

@@ -1,4 +1,5 @@
 #pragma once
+#include "rtc_event_mailbox.hpp"
 #include <livekit/rtc/engine.hpp>
 #include <livekit/remote_control.hpp>
 #include <atomic>
@@ -41,7 +42,7 @@ class RtcConnection {
     while (future.wait_for(0ms) != std::future_status::ready) {
       if (stop_)
         throw std::runtime_error("Remote connection cancelled");
-      engine_->poll();
+
       std::this_thread::sleep_for(5ms);
     }
     if (stop_)
@@ -52,6 +53,7 @@ class RtcConnection {
   bool owned(const std::string& sid) const;
   void subscribe(const rtc::TrackDescriptor&);
   std::unique_ptr<rtc::engine::RtcEngine> engine_;
+  sdk::app_support::RtcEventMailbox engine_events_;
   std::string peer_, peer_sid_;
   const std::atomic<bool>& stop_;
   bool receive_video_, closed_ = false;
