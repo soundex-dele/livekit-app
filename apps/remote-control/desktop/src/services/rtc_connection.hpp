@@ -1,3 +1,4 @@
+#include "rtc_blocking_bridge.hpp"
 #include "rtc_result.hpp"
 using livekit::sdk::app_support::require_result;
 #pragma once
@@ -47,7 +48,7 @@ class RtcConnection {
 
   bool owned(const std::string& sid) const;
   void subscribe(const rtc::TrackDescriptor&);
-  std::unique_ptr<rtc::engine::RtcEngine> engine_;
+  std::unique_ptr<livekit::sdk::app_support::BlockingRtc> engine_;
   sdk::app_support::RtcEventMailbox engine_events_;
   sdk::app_support::DataEventMailbox data_events_;
   std::string peer_, peer_sid_;

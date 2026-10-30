@@ -1,3 +1,4 @@
+#include "rtc_blocking_bridge.hpp"
 #include "rtc_result.hpp"
 using livekit::sdk::app_support::require_result;
 #include "rtc_event_mailbox.hpp"
@@ -53,7 +54,7 @@ void Session::start(std::string url, std::string code, sdk::ScreenCaptureDevice 
 
 void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice display) {
   std::string id, key;
-  std::unique_ptr<rtc::engine::RtcEngine> engine;
+  std::unique_ptr<livekit::sdk::app_support::BlockingRtc> engine;
   const auto setState = [&](std::string state) {
     std::lock_guard lock(mutex_);
     snapshot_.state = std::move(state);
@@ -84,7 +85,7 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
             av::request(url, "/api/v1/screen-cast/sessions/" + id + "/connect", key, &empty);
         if (!stop_) {
           engine = require_result(
-              rtc::engine::create_livekit_engine(livekit::sdk::rtc::AudioOutputOptions{}));
+              livekit::sdk::app_support::create_blocking_engine(livekit::sdk::rtc::AudioOutputOptions{}));
           livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
           const auto await = [&](auto& result) { return require_result(std::move(result)); };
           rtc::LiveKitRoomOptions options;
