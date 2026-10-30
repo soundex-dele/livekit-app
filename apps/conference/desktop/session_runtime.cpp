@@ -83,7 +83,8 @@ void Session::start(SessionOptions options) {
       };
       try {
         std::map<TrackId, std::shared_ptr<Track>> tracks;
-        auto engine = require_result(engine::create_livekit_engine({}));
+        auto engine =
+            require_result(engine::create_livekit_engine(livekit::sdk::rtc::AudioOutputOptions{}));
         livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
         // Only the supervisor owns engine control. Codec callbacks only replace an owned frame.
         const auto await = [&](auto& result) { return require_result(std::move(result)); };

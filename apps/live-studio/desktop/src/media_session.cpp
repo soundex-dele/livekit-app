@@ -51,7 +51,8 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
   auto cancelled = [&] { return stop_.load() || closing.load(); };
   const auto await = [&](auto& result) { return require_result(std::move(result)); };
   try {
-    engine = require_result(rtc::engine::create_livekit_engine({}));
+    engine =
+        require_result(rtc::engine::create_livekit_engine(livekit::sdk::rtc::AudioOutputOptions{}));
     livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
     auto joining = engine->join(options);
     await(joining);

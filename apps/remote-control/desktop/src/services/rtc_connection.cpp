@@ -9,7 +9,8 @@ using namespace std::chrono_literals;
 
 RtcConnection::RtcConnection(std::string url, std::string token, std::string peer,
                              bool receive_video, const std::atomic<bool>& stop)
-    : engine_(require_result(rtc::engine::create_livekit_engine({}))),
+    : engine_(require_result(
+          rtc::engine::create_livekit_engine(livekit::sdk::rtc::AudioOutputOptions{}))),
       engine_events_(*engine_),
       data_events_(require_result(engine_->room().services())),
       peer_(std::move(peer)),

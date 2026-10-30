@@ -41,7 +41,7 @@ class RtcConnection {
 
  private:
   template <class T>
-  T await(sdk::Result<T>& result) {
+  auto await(T& result) {
     return require_result(std::move(result));
   }
 
