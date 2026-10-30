@@ -1,3 +1,5 @@
+#include "rtc_result.hpp"
+using livekit::sdk::app_support::require_result;
 #include "rtc_event_mailbox.hpp"
 #include "livekit/rtc/livekit.hpp"
 #include "media_session.hpp"
@@ -46,21 +48,10 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
   bool announced = false;
   std::unique_ptr<rtc::engine::RtcEngine> engine;
   std::map<rtc::TrackId, std::shared_ptr<Mailbox>> mailboxes;
-  std::map<rtc::TrackId, livekit::sdk::AsyncResult<rtc::TrackId>> pending;
   auto cancelled = [&] { return stop_.load() || closing.load(); };
-  auto await = [&](auto& future) {
-    while (future.wait_for(0ms) != std::future_status::ready) {
-      if (cancelled())
-        throw std::runtime_error("Studio media connection cancelled");
-
-      std::this_thread::sleep_for(5ms);
-    }
-    if (cancelled())
-      throw std::runtime_error("Studio media connection cancelled");
-    return future.get();
-  };
+  const auto await = [&](auto& result) { return require_result(std::move(result)); };
   try {
-    engine = rtc::engine::create_livekit_engine({});
+    engine = require_result(rtc::engine::create_livekit_engine({}));
     livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
     auto joining = engine->join(options);
     await(joining);
@@ -78,9 +69,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
     rtc::engine::MediaPublishSpec video_config;
     video_config.track = video;
     video_config.input = vi;
-    auto video_operation = engine->publish_video(std::move(video_config));
-    auto publishing_video = std::move(video_operation.ready);
-    await(publishing_video);
+    auto video_operation = require_result(engine->publish_video(std::move(video_config)));
     rtc::TrackDescriptor audio;
     audio.id = "audio";
     audio.name = "Studio audio";
@@ -94,9 +83,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
     rtc::engine::MediaPublishSpec audio_config;
     audio_config.track = audio;
     audio_config.input = ai;
-    auto audio_operation = engine->publish_audio(std::move(audio_config));
-    auto publishing_audio = std::move(audio_operation.ready);
-    await(publishing_audio);
+    auto audio_operation = require_result(engine->publish_audio(std::move(audio_config)));
     connected_ = true;
     started.set_value();
     announced = true;
@@ -135,8 +122,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
                 box->audio.pop_front();
               box->audio.push_back(frame);
             };
-          auto operation = engine->subscribe_media(std::move(config));
-          pending.emplace(d.id, std::move(operation.ready));
+          auto operation = require_result(engine->subscribe_media(std::move(config)));
         }
         if (event->kind == rtc::RoomEventKind::remote_track_removed ||
             event->kind == rtc::RoomEventKind::track_removed) {
@@ -145,8 +131,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
             break;
           }
           if (mailboxes.contains(event->track_id)) {
-            engine->unsubscribe(event->track_id).get();
-            pending.erase(event->track_id);
+            require_result(engine->unsubscribe(event->track_id));
             mailboxes.erase(event->track_id);
             studio->remove_remote(event->track_id);
           }
@@ -154,9 +139,6 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
       }
       if (ended)
         break;
-      for (auto& [id, operation] : pending)
-        if (operation.valid() && operation.wait_for(0ms) == std::future_status::ready)
-          operation.get();
       subscriptions_ = mailboxes.size();
       for (const auto& [id, box] : mailboxes) {
         std::shared_ptr<const sdk::VideoFrame> frame;
@@ -201,7 +183,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
   }
   if (engine)
     try {
-      engine->close().get();
+      require_result(engine->close());
     } catch (const std::exception& error) {
       std::lock_guard lock(mutex_);
       if (error_.empty())

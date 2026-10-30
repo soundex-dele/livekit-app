@@ -1,3 +1,5 @@
+#include "rtc_result.hpp"
+using livekit::sdk::app_support::require_result;
 #include "rtc_event_mailbox.hpp"
 #include "livekit/rtc/livekit.hpp"
 #include "services/session.hpp"
@@ -81,19 +83,9 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
         auto conn =
             av::request(url, "/api/v1/screen-cast/sessions/" + id + "/connect", key, &empty);
         if (!stop_) {
-          engine = rtc::engine::create_livekit_engine({});
+          engine = require_result(rtc::engine::create_livekit_engine({}));
           livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
-          const auto await = [&](auto& future) {
-            while (future.wait_for(0ms) != std::future_status::ready) {
-              if (stop_)
-                throw std::runtime_error("Screen cast cancelled");
-
-              std::this_thread::sleep_for(5ms);
-            }
-            if (stop_)
-              throw std::runtime_error("Screen cast cancelled");
-            return future.get();
-          };
+          const auto await = [&](auto& result) { return require_result(std::move(result)); };
           rtc::LiveKitRoomOptions options;
           options.url = conn.at("media_url");
           options.token = conn.at("media_token");
@@ -128,9 +120,8 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
             if (!stop_)
               snapshot_.preview = frame.pixels;
           };
-          auto publication = engine->publish_video(std::move(config));
-          auto publishing = std::move(publication.ready);
-          await(publishing);
+          auto publication = require_result(engine->publish_video(std::move(config)));
+
           std::set<std::string> participants;
           if (auto state = engine->room().snapshot().session)
             for (const auto& [sid, p] : state->remote)
@@ -193,7 +184,7 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
   stop();
   if (engine) {
     try {
-      engine->close().get();
+      require_result(engine->close());
     } catch (const std::exception& e) {
       std::lock_guard lock(mutex_);
       if (snapshot_.error.empty())

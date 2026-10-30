@@ -1,3 +1,5 @@
+#include "rtc_result.hpp"
+using livekit::sdk::app_support::require_result;
 #include "livekit/rtc/livekit.hpp"
 #include "services/rtc_connection.hpp"
 #include <algorithm>
@@ -7,9 +9,9 @@ using namespace std::chrono_literals;
 
 RtcConnection::RtcConnection(std::string url, std::string token, std::string peer,
                              bool receive_video, const std::atomic<bool>& stop)
-    : engine_(rtc::engine::create_livekit_engine({})),
+    : engine_(require_result(rtc::engine::create_livekit_engine({}))),
       engine_events_(*engine_),
-      data_events_(engine_->room().services()),
+      data_events_(require_result(engine_->room().services())),
       peer_(std::move(peer)),
       stop_(stop),
       receive_video_(receive_video) {
@@ -50,7 +52,7 @@ void RtcConnection::close() {
   if (closed_)
     return;
   closed_ = true;
-  engine_->close().get();
+  require_result(engine_->close());
   std::lock_guard lock(frames_mutex_);
   frames_.clear();
 }
@@ -83,9 +85,7 @@ void RtcConnection::publish_screen(int width, int height, bool generated) {
   rtc::engine::MediaPublishSpec config;
   config.track = d;
   config.input = input;
-  auto publication = engine_->publish_video(std::move(config));
-  auto publishing = std::move(publication.ready);
-  await(publishing);
+  auto publication = require_result(engine_->publish_video(std::move(config)));
 }
 
 void RtcConnection::subscribe(const rtc::TrackDescriptor& d) {
@@ -97,9 +97,8 @@ void RtcConnection::subscribe(const rtc::TrackDescriptor& d) {
     std::lock_guard lock(frames_mutex_);
     frames_[id] = frame.pixels;
   };
-  auto subscription = engine_->subscribe_media(std::move(config));
-  auto pending = std::move(subscription.ready);
-  subscriptions_.emplace(d.id, std::move(pending));
+  auto subscription = require_result(engine_->subscribe_media(std::move(config)));
+  subscriptions_.insert(d.id);
 }
 
 void RtcConnection::poll() {
@@ -120,7 +119,7 @@ void RtcConnection::poll() {
       if (event->track_id == "screen")
         throw std::runtime_error("Screen publication revoked");
       if (subscriptions_.contains(event->track_id)) {
-        engine_->unsubscribe(event->track_id).get();
+        require_result(engine_->unsubscribe(event->track_id));
         subscriptions_.erase(event->track_id);
         std::lock_guard lock(frames_mutex_);
         frames_.erase(event->track_id);
@@ -146,9 +145,6 @@ void RtcConnection::poll() {
 
   if (auto failure = engine_events_.take_failure())
     throw std::runtime_error(failure->message);
-  for (auto& [id, pending] : subscriptions_)
-    if (pending.valid() && pending.wait_for(0ms) == std::future_status::ready)
-      pending.get();
 }
 
 std::vector<RtcConnection::Packet> RtcConnection::take_data() {
@@ -174,7 +170,7 @@ std::future<void> RtcConnection::send(std::vector<uint8_t> data) {
   options.topic = sdk::remote_control_topic;
   options.destinations = {peer_};
   options.operation.timeout = 2s;
-  return engine_->room().services()->send_data(std::move(data), options);
+  return require_result(engine_->room().services())->send_data(std::move(data), options);
 }
 
 std::shared_ptr<const sdk::VideoFrame> RtcConnection::take_frame() {

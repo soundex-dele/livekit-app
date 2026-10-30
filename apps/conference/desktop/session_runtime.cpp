@@ -1,3 +1,5 @@
+#include "rtc_result.hpp"
+using livekit::sdk::app_support::require_result;
 #include "rtc_event_mailbox.hpp"
 #include "session.hpp"
 #include <livekit/rtc/engine.hpp>
@@ -12,7 +14,6 @@ using namespace std::chrono_literals;
 struct Track {
   TrackDescriptor descriptor;
   bool publication = false, ready = false;
-  livekit::sdk::AsyncResult<TrackId> pending;
   std::shared_ptr<engine::MediaTrack> media;
 
   std::string sid() const {
@@ -21,7 +22,7 @@ struct Track {
 
   void check() const {
     if (media)
-      media->throw_if_failed();
+      require_result(media->check());
   }
 };
 
@@ -82,18 +83,10 @@ void Session::start(SessionOptions options) {
       };
       try {
         std::map<TrackId, std::shared_ptr<Track>> tracks;
-        auto engine = engine::create_livekit_engine({});
+        auto engine = require_result(engine::create_livekit_engine({}));
         livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
         // Only the supervisor owns engine control. Codec callbacks only replace an owned frame.
-        const auto await = [&](auto& future) {
-          while (future.wait_for(0ms) != std::future_status::ready) {
-            if (stop.stop_requested())
-              throw std::runtime_error("Session cancelled");
-
-            std::this_thread::sleep_for(5ms);
-          }
-          return future.get();
-        };
+        const auto await = [&](auto& result) { return require_result(std::move(result)); };
         options.connection.subscribe = false;
         options.connection.subscribe_tracks.clear();
         auto joining = engine->join(options.connection);
@@ -150,22 +143,20 @@ void Session::start(SessionOptions options) {
               if (data_.state != State::Disconnecting)
                 data_.frames[id] = frame.pixels;
             };
-          auto operation = engine->publish_media(std::move(config));
+          auto operation = require_result(engine->publish_media(std::move(config)));
           track->media = std::move(operation.track);
-          track->pending = std::move(operation.ready);
+          track->ready = true;
           tracks.emplace(d.id, track);
           return track;
         };
         for (const auto& media : options.media) {
           auto track = publish(media);
-          await(track->pending);
           track->ready = true;
         }
         if (options.microphone) {
           sdk::MediaSpec spec;
           spec.video = false;
           auto track = publish(spec, true);
-          await(track->pending);
           track->ready = true;
         }
         const auto subscribe = [&](TrackDescriptor descriptor) {
@@ -196,12 +187,12 @@ void Session::start(SessionOptions options) {
                 ++data_.non_silent_audio_frames;
             };
           }
-          auto operation = engine->subscribe_media(std::move(config));
+          auto operation = require_result(engine->subscribe_media(std::move(config)));
           track->media = std::move(operation.track);
-          track->pending = std::move(operation.ready);
+          track->ready = true;
           tracks.emplace(descriptor.id, std::move(track));
         };
-        auto services = engine->room().services();
+        auto services = require_result(engine->room().services());
         services->set_event_handler([this, room = engine->room()](const DataEvent& event) {
           const auto* message = std::get_if<ReceivedData>(&event.value);
           if (!message || message->topic != chat_topic) { return; }
@@ -267,12 +258,7 @@ void Session::start(SessionOptions options) {
             if (it != tracks.end())
               throw std::runtime_error("Track " + failure->id + ": " + failure->message);
           }
-          for (auto& [id, track] : tracks)
-            if (track->pending.valid() &&
-                track->pending.wait_for(0ms) == std::future_status::ready) {
-              track->pending.get();
-              track->ready = true;
-            }
+
           if (chat_send.valid() && chat_send.wait_for(0ms) == std::future_status::ready) {
             bool confirmed = true;
             try {
@@ -326,7 +312,6 @@ void Session::start(SessionOptions options) {
                 auto track = publish(command->source.value_or(spec), command->microphone,
                                      command->publication_source);
                 adding = track->descriptor.id;
-                await(track->pending);
                 track->ready = true;
               } else {
                 const auto found =
@@ -348,7 +333,7 @@ void Session::start(SessionOptions options) {
               failure = redact(e.what());
               if (!adding.empty()) {
                 try {
-                  engine->unpublish(adding).get();
+                  require_result(engine->unpublish(adding));
                 } catch (...) {
                 }
                 tracks.erase(adding);
@@ -382,7 +367,7 @@ void Session::start(SessionOptions options) {
           }
           std::this_thread::sleep_for(5ms);
         }
-        engine->close().get();
+        require_result(engine->close());
         for (const auto& [id, track] : tracks)
           track->check();
       } catch (const std::exception& e) {

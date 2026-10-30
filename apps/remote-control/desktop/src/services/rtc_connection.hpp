@@ -1,9 +1,12 @@
+#include "rtc_result.hpp"
+using livekit::sdk::app_support::require_result;
 #pragma once
 #include "rtc_event_mailbox.hpp"
 #include "data_event_mailbox.hpp"
 #include <livekit/rtc/engine.hpp>
 #include <livekit/remote_control.hpp>
 #include <atomic>
+#include <set>
 #include <mutex>
 #include <thread>
 
@@ -38,17 +41,8 @@ class RtcConnection {
 
  private:
   template <class T>
-  T await(sdk::AsyncResult<T>& future) {
-    using namespace std::chrono_literals;
-    while (future.wait_for(0ms) != std::future_status::ready) {
-      if (stop_)
-        throw std::runtime_error("Remote connection cancelled");
-
-      std::this_thread::sleep_for(5ms);
-    }
-    if (stop_)
-      throw std::runtime_error("Remote connection cancelled");
-    return future.get();
+  T await(sdk::Result<T>& result) {
+    return require_result(std::move(result));
   }
 
   bool owned(const std::string& sid) const;
@@ -60,7 +54,7 @@ class RtcConnection {
   const std::atomic<bool>& stop_;
   bool receive_video_, closed_ = false;
   std::map<rtc::TrackId, rtc::TrackDescriptor> discovered_;
-  std::map<rtc::TrackId, sdk::AsyncResult<rtc::TrackId>> subscriptions_;
+  std::set<rtc::TrackId> subscriptions_;
   std::mutex frames_mutex_;
   std::map<rtc::TrackId, std::shared_ptr<const sdk::VideoFrame>> frames_;
 };
