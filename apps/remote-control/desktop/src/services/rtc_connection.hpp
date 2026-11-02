@@ -1,6 +1,4 @@
 #include "rtc_blocking_bridge.hpp"
-#include "rtc_result.hpp"
-using livekit::sdk::app_support::require_result;
 #pragma once
 #include "rtc_event_mailbox.hpp"
 #include "data_event_mailbox.hpp"
@@ -15,42 +13,34 @@ namespace remote_app {
 namespace sdk = livekit::sdk;
 namespace rtc = sdk::rtc;
 
-class ConnectionEnded final : public std::runtime_error {
- public:
-  using std::runtime_error::runtime_error;
-};
-
 // Owned only by the media supervisor. A new connection never restores a grant.
 class RtcConnection {
  public:
   RtcConnection(std::string url, std::string token, std::string peer, bool receive_video,
                 const std::atomic<bool>& stop);
   ~RtcConnection();
-  void publish_screen(int width, int height, bool generated);
-  void poll();
+  sdk::Result<void> publish_screen(int width, int height, bool generated);
+  sdk::Result<void> poll();
+  sdk::Result<void> status() const;
 
   struct Packet {
     std::vector<uint8_t> bytes;
     sdk::DataReceiveParams source;
   };
 
-  std::vector<Packet> take_data();
-  std::future<void> send(std::vector<uint8_t>);
+  sdk::Result<std::vector<Packet>> take_data();
+  std::future<sdk::Result<void>> send(std::vector<uint8_t>);
   std::shared_ptr<const sdk::VideoFrame> take_frame();
   bool connected() const;
-  void close();
+  sdk::Result<void> close();
 
  private:
-  template <class T>
-  auto await(T& result) {
-    return require_result(std::move(result));
-  }
-
   bool owned(const std::string& sid) const;
-  void subscribe(const rtc::TrackDescriptor&);
+  sdk::Result<void> subscribe(const rtc::TrackDescriptor&);
   std::unique_ptr<livekit::sdk::app_support::BlockingRtc> engine_;
   sdk::app_support::RtcEventMailbox engine_events_;
-  sdk::app_support::DataEventMailbox data_events_;
+  std::unique_ptr<sdk::app_support::DataEventMailbox> data_events_;
+  sdk::Failure failure_;
   std::string peer_, peer_sid_;
   const std::atomic<bool>& stop_;
   bool receive_video_, closed_ = false;

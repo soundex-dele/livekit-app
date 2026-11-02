@@ -304,91 +304,113 @@ void Controller::run(std::string url, std::string code, std::string name) {
 void Controller::media(std::string url, sdk::Json grant, std::string credential) {
   std::unique_ptr<RtcConnection> connection;
   try {
-    sdk::Json empty = sdk::Json::object();
-    auto connect = request(
-        url,
-        "/api/v1/remote-control/control-grants/" + grant.at("id").get<std::string>() + "/connect",
-        credential, &empty);
-    if (stop_)
-      return;
-    connection = std::make_unique<RtcConnection>(connect.at("media_url"), connect.at("media_token"),
-                                                 grant.at("host_identity"), true, stop_);
-    auto next = sdk::ControlClock::now(), move_at = next, layout_deadline = next + 10s;
+    const auto run_media = [&]() -> sdk::Result<void> {
+      sdk::Json empty = sdk::Json::object();
+      auto connect = request(
+          url,
+          "/api/v1/remote-control/control-grants/" + grant.at("id").get<std::string>() + "/connect",
+          credential, &empty);
+      if (stop_)
+        return sdk::Result<void>::success();
+      connection =
+          std::make_unique<RtcConnection>(connect.at("media_url"), connect.at("media_token"),
+                                          grant.at("host_identity"), true, stop_);
+      auto ready = connection->status();
+      if (!ready) {
+        return ready;
+      }
+      auto next = sdk::ControlClock::now(), move_at = next, layout_deadline = next + 10s;
 
-    struct Send {
-      std::future<void> future;
-      sdk::ControlClock::time_point deadline;
+      struct Send {
+        std::future<sdk::Result<void>> future;
+        sdk::ControlClock::time_point deadline;
+      };
+
+      std::optional<Send> sending;
+      while (!stop_) {
+        auto polled = connection->poll();
+        if (!polled) {
+          return polled;
+        }
+        auto received = connection->take_data();
+        if (!received) {
+          return sdk::Result<void>::failure(received.failure_record());
+        }
+        for (const auto& packet : *received) {
+          std::lock_guard lock(mutex_);
+          if (!stop_ && protocol_.receive(packet.bytes, packet.source))
+            snapshot_.state = "connected";
+        }
+        const auto now = sdk::ControlClock::now();
+        std::optional<sdk::Json> packet;
+        if (sending) {
+          if (sending->future.wait_for(0ms) == std::future_status::ready) {
+            auto sent = sending->future.get();
+            if (!sent) {
+              return sent;
+            }
+            sending.reset();
+          } else if (now >= sending->deadline)
+            return sdk::Result<void>::failure(sdk::make_failure(
+                sdk::ErrorDomain::data, sdk::ErrorCode::timeout, "控制通道发送超时"));
+        }
+        {
+          std::lock_guard lock(mutex_);
+          protocol_.tick(now);
+          if (now >= next) {
+            protocol_.push({{"type", "heartbeat"}});
+            next = now + 1s;
+          }
+          if (now >= move_at) {
+            protocol_.flush_move();
+            move_at = now + 34ms;
+          }
+          if (!sending && !protocol_.queue.empty())
+            packet = protocol_.next();
+          if (protocol_.layout.is_null() && now >= layout_deadline)
+            return sdk::Result<void>::failure(sdk::make_failure(
+                sdk::ErrorDomain::data, sdk::ErrorCode::timeout, "未收到被控端布局确认"));
+        }
+        if (packet) {
+          auto raw = packet->dump();
+          sending = Send{connection->send({raw.begin(), raw.end()}), now + 2s};
+        }
+        if (auto frame = connection->take_frame()) {
+          auto image = convert_frame(*frame);
+          std::lock_guard lock(mutex_);
+          if (!stop_) {
+            snapshot_.image = std::move(image);
+            ++snapshot_.frames;
+          }
+        }
+        std::this_thread::sleep_for(5ms);
+      }
+      // Best-effort explicit stop; cancellation/watchdog remain authoritative.
+      if (connection->connected()) {
+        sdk::Json event;
+        {
+          std::lock_guard lock(mutex_);
+          protocol_.finish();
+          event = protocol_.next();
+        }
+        auto raw = event.dump();
+        auto sent = connection->send({raw.begin(), raw.end()});
+        sent.wait_for(200ms);
+      }
+      return sdk::Result<void>::success();
     };
-
-    std::optional<Send> sending;
-    while (!stop_) {
-      connection->poll();
-      for (const auto& packet : connection->take_data()) {
-        std::lock_guard lock(mutex_);
-        if (!stop_ && protocol_.receive(packet.bytes, packet.source))
-          snapshot_.state = "connected";
-      }
-      const auto now = sdk::ControlClock::now();
-      std::optional<sdk::Json> packet;
-      if (sending) {
-        if (sending->future.wait_for(0ms) == std::future_status::ready) {
-          sending->future.get();
-          sending.reset();
-        } else if (now >= sending->deadline)
-          throw std::runtime_error("控制通道发送超时");
-      }
-      {
-        std::lock_guard lock(mutex_);
-        protocol_.tick(now);
-        if (now >= next) {
-          protocol_.push({{"type", "heartbeat"}});
-          next = now + 1s;
-        }
-        if (now >= move_at) {
-          protocol_.flush_move();
-          move_at = now + 34ms;
-        }
-        if (!sending && !protocol_.queue.empty())
-          packet = protocol_.next();
-        if (protocol_.layout.is_null() && now >= layout_deadline)
-          throw std::runtime_error("未收到被控端布局确认");
-      }
-      if (packet) {
-        auto raw = packet->dump();
-        sending = Send{connection->send({raw.begin(), raw.end()}), now + 2s};
-      }
-      if (auto frame = connection->take_frame()) {
-        auto image = convert_frame(*frame);
-        std::lock_guard lock(mutex_);
-        if (!stop_) {
-          snapshot_.image = std::move(image);
-          ++snapshot_.frames;
-        }
-      }
-      std::this_thread::sleep_for(5ms);
-    }
-    // Best-effort explicit stop; cancellation/watchdog remain authoritative.
-    if (connection->connected()) {
-      sdk::Json event;
-      {
-        std::lock_guard lock(mutex_);
-        protocol_.finish();
-        event = protocol_.next();
-      }
-      auto raw = event.dump();
-      auto sent = connection->send({raw.begin(), raw.end()});
-      sent.wait_for(200ms);
+    auto outcome = run_media();
+    if (!outcome && !stop_ && outcome.error().code != sdk::ErrorCode::session_closed) {
+      fail(outcome.failure_record()->message);
     }
   } catch (const std::exception& e) {
     if (!stop_)
       fail(e.what());
   }
   if (connection) {
-    try {
-      connection->close();
-    } catch (const std::exception& e) {
-      if (!stop_)
-        fail(e.what());
+    auto closed = connection->close();
+    if (!closed && !stop_) {
+      fail(closed.failure_record()->message);
     }
   }
   stop_ = true;

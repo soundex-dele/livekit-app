@@ -11,21 +11,29 @@ Controller::Controller(std::unique_ptr<AudioOutput> audio, QObject* parent)
     std::lock_guard lock(state->mutex);
     if (!state->owner ||
         !QMetaObject::invokeMethod(state->owner, std::move(task), Qt::QueuedConnection)) {
-      throw sdk::SDKError(sdk::ErrorDomain::lifecycle, sdk::ErrorCode::cancelled,
-                          "Player controller was destroyed");
+      return sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::lifecycle,
+                                                          sdk::ErrorCode::cancelled,
+                                                          "Player controller was destroyed"));
     }
+    return sdk::Result<void>::success();
   };
   sdk::PlayerCallbacks callbacks;
   callbacks.video = [output = output_](const auto& frame) {
     std::lock_guard lock(output->mutex);
     output->video = frame;
+    return sdk::Result<void>::success();
   };
   callbacks.audio = [output = output_](const auto& frame) {
     std::lock_guard lock(output->mutex);
     output->audio = frame;
     output->requested = false;
+    return sdk::Result<void>::success();
   };
-  player_.set_callbacks(std::move(callbacks), {sdk::PlayerAudioDelivery::on_demand});
+  auto registered =
+      player_.set_callbacks(std::move(callbacks), {sdk::PlayerAudioDelivery::on_demand});
+  if (!registered) {
+    error_ = QString::fromStdString(registered.error().message);
+  }
   timer_.setInterval(8);
   timer_.setTimerType(Qt::PreciseTimer);
   connect(&timer_, &QTimer::timeout, this, &Controller::update);
@@ -38,7 +46,10 @@ Controller::~Controller() {
     std::lock_guard lock(dispatch_state_->mutex);
     dispatch_state_->owner = nullptr;
   }
-  player_.set_callbacks({});
+  auto cleared = player_.set_callbacks({});
+  if (!cleared) {
+    error_ = QString::fromStdString(cleared.error().message);
+  }
   player_.cancel_pending_io();
 }
 
@@ -77,17 +88,20 @@ void Controller::command(Operation operation, sdk::AsyncResult<void> pending) {
 }
 
 void Controller::open(const QString& path, qint64 resumeUs) {
-  if (closing_ || path.isEmpty())
+  if (closing_ || path.isEmpty()) {
     return;
+  }
   nextSeek_.reset();
   stopRequested_ = false;
   autoplay_ = false;
   if (busy()) {
     nextOpen_ = std::make_pair(path, resumeUs);
-    if (operation_ == Operation::open)
+    if (operation_ == Operation::open) {
       player_.cancel_pending_io();
-  } else
+    }
+  } else {
     startOpen(path, resumeUs);
+  }
 }
 
 void Controller::startOpen(const QString& path, qint64 resumeUs) {
@@ -116,38 +130,43 @@ void Controller::startOpen(const QString& path, qint64 resumeUs) {
 }
 
 void Controller::togglePlay() {
-  if (closing_ || busy())
+  if (closing_ || busy()) {
     return;
+  }
   const auto state = snapshot().state;
   if (state == sdk::PlayerState::playing) {
     audio_->suspend(true);
     command(Operation::pause, player_.pause());
   } else if (state == sdk::PlayerState::ready || state == sdk::PlayerState::paused ||
              state == sdk::PlayerState::ended) {
-    if (state == sdk::PlayerState::ended)
+    if (state == sdk::PlayerState::ended) {
       resetOutput(true);
+    }
     endEmitted_ = false;
     command(Operation::play, player_.play());
   }
 }
 
 void Controller::seek(qint64 positionUs) {
-  if (closing_ || !error_.isEmpty() || path_.isEmpty())
+  if (closing_ || !error_.isEmpty() || path_.isEmpty()) {
     return;
+  }
   nextSeek_ = std::max<qint64>(0, positionUs);
 }
 
 void Controller::stop() {
-  if (closing_ || path_.isEmpty() || !error_.isEmpty())
+  if (closing_ || path_.isEmpty() || !error_.isEmpty()) {
     return;
+  }
   nextSeek_.reset();
   autoplay_ = false;
   stopRequested_ = true;
 }
 
 void Controller::close() {
-  if (closing_)
+  if (closing_) {
     return;
+  }
   closing_ = true;
   autoplay_ = false;
   nextOpen_.reset();
@@ -199,12 +218,22 @@ void Controller::reportFailure(const QString& message) {
 }
 
 void Controller::update() {
-  if (finished_)
+  if (finished_) {
     return;
+  }
   try {
     if (operation_ == Operation::open && completion_ready_) {
       completion_ready_ = false;
-      const auto media = opening_.get();
+      const auto opened = opening_.get();
+      if (!opened) {
+        operation_ = Operation::none;
+        if (!nextOpen_) {
+          reportFailure(QString::fromStdString(opened.error().message));
+        }
+        emit changed();
+        return;
+      }
+      const auto& media = *opened;
       {
         std::lock_guard lock(output_->mutex);
         output_->requested = false;
@@ -212,19 +241,35 @@ void Controller::update() {
       operation_ = Operation::none;
       if (!nextOpen_) {
         generation_ = snapshot().generation;
-        if (media.has_audio)
+        if (media.has_audio) {
           audio_->open();
+        }
         // Validate stored positions against the file's current duration.
         if (!nextSeek_ && resumeUs_ > 0 && media.duration_us > 0 &&
-            resumeUs_ < media.duration_us - 10000000)
+            resumeUs_ < media.duration_us - 10000000) {
           nextSeek_ = resumeUs_;
+        }
         autoplay_ = !stopRequested_;
         emit opened();
       }
     } else if (busy() && operation_ != Operation::open && completion_ready_) {
       completion_ready_ = false;
       const auto completed = operation_;
-      pending_.get();
+      const auto result = pending_.get();
+      if (!result) {
+        operation_ = Operation::none;
+        if (closing_) {
+          finished_ = true;
+          timer_.stop();
+          emit closed();
+          return;
+        }
+        if (!nextOpen_) {
+          reportFailure(QString::fromStdString(result.error().message));
+        }
+        emit changed();
+        return;
+      }
       operation_ = Operation::none;
       if (completed == Operation::pause || completed == Operation::seek ||
           completed == Operation::stop || completed == Operation::recover ||
@@ -242,8 +287,9 @@ void Controller::update() {
         resetOutput(true);
         generation_ = snapshot().generation;
       }
-      if (completed == Operation::play)
+      if (completed == Operation::play) {
         audio_->suspend(false);
+      }
     }
     if (!busy() && !closing_ && nextOpen_) {
       const auto next = *nextOpen_;
@@ -259,8 +305,9 @@ void Controller::update() {
         auto position = *nextSeek_;
         nextSeek_.reset();
         const auto duration = snapshot().media.duration_us;
-        if (duration > 0)
+        if (duration > 0) {
           position = std::min<qint64>(position, duration);
+        }
         resetOutput(true);
         endEmitted_ = false;
         command(Operation::seek, player_.seek(std::chrono::microseconds(position)));
@@ -271,9 +318,9 @@ void Controller::update() {
     }
     if (!busy() && !closing_ && error_.isEmpty()) {
       const auto state = snapshot();
-      if (state.state == sdk::PlayerState::failed)
+      if (state.state == sdk::PlayerState::failed) {
         reportFailure(QString::fromStdString(state.error));
-      else {
+      } else {
         if (generation_ != state.generation) {
           resetOutput(true);
           generation_ = state.generation;
@@ -326,8 +373,9 @@ void Controller::update() {
       emit closed();
       return;
     }
-    if (!nextOpen_)
+    if (!nextOpen_) {
       reportFailure(QString::fromUtf8(e.what()));
+    }
   }
   emit changed();
   emit ticked();

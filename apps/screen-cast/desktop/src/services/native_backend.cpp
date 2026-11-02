@@ -4,7 +4,7 @@
 namespace screen_cast {
 namespace {
 class NativeBackend final : public Backend {
-  std::vector<livekit::sdk::ScreenCaptureDevice> devices() override {
+  livekit::sdk::Result<std::vector<livekit::sdk::ScreenCaptureDevice>> devices() override {
     return livekit::sdk::screen_capture_devices();
   }
 

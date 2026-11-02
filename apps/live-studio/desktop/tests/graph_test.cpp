@@ -1,3 +1,4 @@
+#include "result_check.hpp"
 #include "engines/studio/studio_graph.hpp"
 #include "media_nodes/capture/video_source.hpp"
 #include "media_nodes/capture/audio_source.hpp"
@@ -17,17 +18,6 @@ namespace {
 void check(bool value, const char* message) {
   if (!value)
     throw std::runtime_error(message);
-}
-
-template <class F>
-void fails(F operation) {
-  bool failed = false;
-  try {
-    operation();
-  } catch (const std::exception&) {
-    failed = true;
-  }
-  check(failed, "expected operation to fail");
 }
 
 void states(const StudioGraph& graph, LifecycleState expected) {
@@ -63,13 +53,13 @@ void routing_and_lifecycle() {
   state.settings.remote_volume = .5f;
   detail::I420SourceReader local_video(state.localVideo), program_video(state.programVideo);
   detail::PcmSourceReader local_audio(state.localAudio), program_audio(state.programAudio);
-  local_video.start();
-  program_video.start();
-  local_audio.start();
-  program_audio.start();
+  checked(local_video.start());
+  checked(program_video.start());
+  checked(local_audio.start());
+  checked(program_audio.start());
   StudioGraph graph(state);
   states(graph, LifecycleState::Created);
-  fails([&] { graph.step(); });
+  check(!graph.step(), "expected operation to fail");
   std::set<std::pair<std::string, std::string>> expected{
       {"studio.clock", "studio.sources"},      {"studio.clock", "studio.recorder"},
       {"studio.sources", "studio.mixer"},      {"studio.sources", "studio.compositor"},
@@ -81,17 +71,17 @@ void routing_and_lifecycle() {
     check(expected.erase({edge.from, edge.to}) == 1, "unexpected graph connection");
   }
   check(expected.empty(), "missing graph connections");
-  graph.start();
+  checked(graph.start());
   states(graph, LifecycleState::Running);
-  graph.step();
+  checked(graph.step());
   check(state.status.frames == 1 && state.status.preview, "preview receives graph frame");
   check(
       state.programVideo->stats().queued_frames > 0 && state.localVideo->stats().queued_frames > 0,
       "video branches receive graph frame");
   auto local = local_video.read({}), program = program_video.read({});
   check(local && program, "video publication frames");
-  color(*from_i420(local->frame), 960, 360, 255, 0, 0);
-  auto program_image = from_i420(program->frame);
+  color(*checked(from_i420(local->frame)), 960, 360, 255, 0, 0);
+  auto program_image = checked(from_i420(program->frame));
   color(*program_image, 320, 360, 255, 0, 0);
   color(*program_image, 960, 360, 0, 0, 255);
   color(*state.status.preview, 960, 360, 0, 0, 255);
@@ -118,22 +108,22 @@ void routing_and_lifecycle() {
   state.remoteAudio.clear();
   state.remoteSeen.clear();
   std::this_thread::sleep_for(std::chrono::milliseconds(35));
-  graph.step();
+  checked(graph.step());
   color(*state.status.preview, 960, 360, 0, 255, 0);
   auto frames = state.status.frames;
   graph.stop();
   states(graph, LifecycleState::Stopped);
-  fails([&] { graph.step(); });
+  check(!graph.step(), "expected operation to fail");
   check(state.status.frames == frames, "stopped graph produced frames");
-  graph.start();
-  graph.step();
+  checked(graph.start());
+  checked(graph.step());
   check(state.status.frames == frames + 1, "graph restart did not produce a frame");
 
   // Exercise bounded publication queues and ensure backpressure cannot block
   // preview. Readers deliberately stop consuming while the graph keeps running.
   for (int i = 0; i < 5; ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(35));
-    graph.step();
+    checked(graph.step());
   }
   check(state.programVideo->stats().queued_frames <= 3 &&
             state.programAudio->stats().queued_blocks <= 6,
@@ -146,7 +136,7 @@ void routing_and_lifecycle() {
             state.programAudio->stats().closed && state.localAudio->stats().closed,
         "release did not close all output branches");
   check(!program_video.read({}) && !program_audio.read(), "release did not signal EOS");
-  fails([&] { graph.start(); });
+  check(!graph.start(), "expected operation to fail");
 }
 
 void recording_and_failure(const std::filesystem::path& directory) {
@@ -165,12 +155,12 @@ void recording_and_failure(const std::filesystem::path& directory) {
     StudioGraph graph(state);
     state.recordPath = path;
     state.recordWanted = true;
-    graph.start();
-    graph.step();
+    checked(graph.start());
+    checked(graph.step());
     check(state.status.recording, "recording control did not reach sink");
     for (int i = 0; i < 4; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(35));
-      graph.step();
+      checked(graph.step());
     }
     graph.stop();
     check(!state.status.recording && state.status.error.empty(),
@@ -191,11 +181,11 @@ void recording_and_failure(const std::filesystem::path& directory) {
     file.input = path.string();
     playback.scene.sources = {file};
     StudioGraph graph(playback);
-    graph.start();
+    checked(graph.start());
     bool saw_video = false, saw_audio = false;
     auto deadline = Clock::now() + std::chrono::seconds(3);
     while (Clock::now() < deadline && !(saw_video && saw_audio)) {
-      graph.step();
+      checked(graph.step());
       saw_audio |= playback.status.output_peak > .05f;
       if (auto preview = playback.status.preview) {
         auto p = (size_t(360) * preview->width + 640) * 4;
@@ -213,8 +203,8 @@ void recording_and_failure(const std::filesystem::path& directory) {
     collision.recordPath = path;
     collision.recordWanted = true;
     StudioGraph graph(collision);
-    graph.start();
-    graph.step();
+    checked(graph.start());
+    checked(graph.step());
     check(!collision.recordWanted && !collision.status.recording && !collision.status.error.empty(),
           "recorder collision must be visible and nonfatal");
     check(collision.status.frames > 0, "recorder failure stopped preview");
@@ -225,10 +215,10 @@ void recording_and_failure(const std::filesystem::path& directory) {
     // Bypass the facade validator to force a processing error inside EventBus.
     broken.settings.microphone_volume = 5;
     StudioGraph graph(broken);
-    graph.start();
-    fails([&] { graph.step(); });
+    checked(graph.start());
+    check(!graph.step(), "expected operation to fail");
     check(broken.status.frames == 0, "graph continued after a processing failure");
-    fails([&] { graph.step(); });
+    check(!graph.step(), "expected operation to fail");
     graph.release();
     states(graph, LifecycleState::Released);
   }

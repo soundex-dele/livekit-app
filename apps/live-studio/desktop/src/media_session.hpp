@@ -4,6 +4,7 @@
 #include <livekit/studio.hpp>
 #include <atomic>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <thread>
 
@@ -41,7 +42,7 @@ class MediaSession {
 
  private:
   void run(livekit::sdk::rtc::LiveKitRoomOptions, std::shared_ptr<livekit::sdk::Studio>, bool,
-           const std::atomic<bool>&, Statistics, std::promise<void>);
+           const std::atomic<bool>&, Statistics, std::promise<livekit::sdk::Result<void>>);
   std::atomic<bool> stop_{false}, connected_{false}, finished_{false};
   std::atomic<uint64_t> received_video_{0}, received_audio_{0};
   std::atomic<size_t> subscriptions_{0};

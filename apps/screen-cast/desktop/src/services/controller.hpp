@@ -1,5 +1,6 @@
 #pragma once
 #include "features/ui.hpp"
+#include "livekit/result.hpp"
 #include <QObject>
 #include <QTimer>
 #include <condition_variable>
@@ -34,7 +35,7 @@ class FrameConverter {
 class Backend {
  public:
   virtual ~Backend() = default;
-  virtual std::vector<livekit::sdk::ScreenCaptureDevice> devices() = 0;
+  virtual livekit::sdk::Result<std::vector<livekit::sdk::ScreenCaptureDevice>> devices() = 0;
   virtual void start(std::string url, std::string code,
                      livekit::sdk::ScreenCaptureDevice display) = 0;
   virtual void stop() = 0;
@@ -53,7 +54,7 @@ class Controller final : public QObject {
   std::unique_ptr<Backend> backend_;
   QTimer timer_;
   FrameConverter converter_;
-  std::future<std::vector<livekit::sdk::ScreenCaptureDevice>> devices_;
+  std::future<livekit::sdk::Result<std::vector<livekit::sdk::ScreenCaptureDevice>>> devices_;
   bool closing_ = false, stopping_ = false;
   std::string lastState_, lastError_;
   bool lastFinished_ = true;

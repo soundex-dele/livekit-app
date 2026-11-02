@@ -97,4 +97,8 @@ if(BUILD_TESTING)
   target_link_libraries(livekit_demo_tests PRIVATE av_meeting_widgets Qt6::Test)
   add_test(NAME conference_widgets COMMAND livekit_demo_tests)
   set_tests_properties(conference_widgets PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  if(WIN32)
+    set_property(TEST conference_widgets APPEND PROPERTY ENVIRONMENT_MODIFICATION
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
 endif()

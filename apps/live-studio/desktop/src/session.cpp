@@ -175,8 +175,13 @@ void Session::reconfigure(sdk::StudioOptions o) {
     std::shared_ptr<sdk::Studio> old;
     {
       std::lock_guard lock(mutex_);
-      next->set_scene(scene_);
-      next->set_audio(audio_);
+      for (const auto& result :
+           {next->status(), next->set_scene(scene_), next->set_audio(audio_)}) {
+        if (!result) {
+          state_.error = result.error().message;
+          return;
+        }
+      }
       old = std::move(engine_);
       engine_ = std::move(next);
     }
@@ -185,13 +190,21 @@ void Session::reconfigure(sdk::StudioOptions o) {
 
 void Session::set_scene(sdk::StudioScene s) {
   std::lock_guard lock(mutex_);
-  engine_->set_scene(s);
+  auto result = engine_->set_scene(s);
+  if (!result) {
+    state_.error = result.error().message;
+    return;
+  }
   scene_ = std::move(s);
 }
 
 void Session::set_audio(sdk::StudioAudioSettings a) {
   std::lock_guard lock(mutex_);
-  engine_->set_audio(a);
+  auto result = engine_->set_audio(a);
+  if (!result) {
+    state_.error = result.error().message;
+    return;
+  }
   audio_ = a;
 }
 
@@ -240,6 +253,11 @@ void Session::connect(bool interaction) {
     };
   auto connection = std::make_unique<MediaSession>(std::move(options), engine(), interaction,
                                                    closing_, std::move(stats));
+  if (!connection->error().empty()) {
+    std::lock_guard lock(mutex_);
+    state_.error = connection->error();
+    return;
+  }
   if (interaction)
     stage_ = std::move(connection);
   else {

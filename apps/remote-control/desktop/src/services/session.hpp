@@ -28,6 +28,7 @@ class Session {
   mutable std::mutex mutex_;
   Snapshot snapshot_;
   sdk::ControlGrant grant_;
+  sdk::Failure failure_;
   std::shared_ptr<sdk::RemoteControlSession> control_;
   std::thread worker_, rtc_;
   std::atomic<bool> stop_{false};

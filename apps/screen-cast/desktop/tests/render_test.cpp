@@ -35,8 +35,9 @@ class FakeBackend : public Backend {
   Snapshot state;
   int starts = 0, stops = 0;
 
-  std::vector<livekit::sdk::ScreenCaptureDevice> devices() override {
-    return displays();
+  livekit::sdk::Result<std::vector<livekit::sdk::ScreenCaptureDevice>> devices() override {
+    return livekit::sdk::Result<std::vector<livekit::sdk::ScreenCaptureDevice>>::success(
+        displays());
   }
 
   void start(std::string, std::string, livekit::sdk::ScreenCaptureDevice) override {
@@ -160,11 +161,13 @@ class UiTest : public QObject {
         Snapshot s;
         s.state = state;
         s.finished = s.state == "idle" || s.state == "ended";
-        if (s.state == "ended")
+        if (s.state == "ended") {
           s.error = "Screen recording permission denied";
+        }
         w.present(s);
-        if (s.state == "streaming")
+        if (s.state == "streaming") {
           w.setPreview(convertFrame(*frame(), {320, 180}));
+        }
         QTest::qWait(10);
         const auto* list = w.findChild<QListWidget*>("displays");
         const auto* action = w.findChild<QPushButton*>(s.finished ? "start" : "stop");

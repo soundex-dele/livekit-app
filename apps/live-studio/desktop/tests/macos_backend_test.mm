@@ -1,3 +1,4 @@
+#include "result_check.hpp"
 #include "audio_samples_macos.hpp"
 #include "internal.hpp"
 #import <AppKit/AppKit.h>
@@ -56,7 +57,7 @@ void audioTests() {
             CMSampleBufferSetDataBufferFromAudioBufferList(
                 sample, nullptr, nullptr, 0, reinterpret_cast<AudioBufferList*>(&buffers)) == noErr,
             "PCM buffers");
-        auto output = converter.convert(sample);
+        auto output = checked(converter.convert(sample));
         CFRelease(sample);
         samples += output.size() / 2;
         if (output.size() > 128)
@@ -112,13 +113,14 @@ int main(int argc, char** argv) {
           overlay.transform.x = .3f;
           layers.emplace_back(overlay, image);
         }
-        auto cpu = studio_composite_cpu(64, 48, layers), gpu = metal.render(layers);
+        auto cpu = checked(studio_composite_cpu(64, 48, layers)),
+             gpu = checked(metal.render(layers));
         int largest = 0;
         for (size_t i = 0; i < cpu.rgba.size(); ++i)
           largest = std::max(largest, std::abs(int(cpu.rgba[i]) - int(gpu.rgba[i])));
         check(largest <= 2, "Metal and CPU composition differ");
       }
-      auto text = studio_detail::text_image("你好，直播助手", {.2f, .4f, .8f, .5f});
+      auto text = checked(studio_detail::text_image("你好，直播助手", {.2f, .4f, .8f, .5f}));
       size_t visible = 0;
       for (size_t i = 0; i < text->rgba.size(); i += 4)
         if (text->rgba[i + 3]) {
@@ -150,13 +152,13 @@ int main(int argc, char** argv) {
       auto png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
       check([png writeToFile:[NSString stringWithUTF8String:path.c_str()] atomically:YES],
             "PNG fixture write");
-      auto loaded = studio_detail::load_image(path.string());
+      auto loaded = checked(studio_detail::load_image(path.string()));
       check(loaded->width == 2 && loaded->height == 2, "image dimensions");
       check(loaded->rgba[0] > 250 && loaded->rgba[2] < 3 &&
                 std::abs(int(loaded->rgba[3]) - 128) < 2 && loaded->rgba[10] > 250,
             "PNG orientation / straight alpha");
-      auto i420 = studio_detail::to_i420(*loaded);
-      auto roundtrip = studio_detail::from_i420(i420);
+      auto i420 = checked(studio_detail::to_i420(*loaded));
+      auto roundtrip = checked(studio_detail::from_i420(i420));
       check(roundtrip->width == 2 && roundtrip->height == 2, "I420 conversion");
       std::cout << "Metal, audio conversion, text and image backends passed\n";
       return 0;

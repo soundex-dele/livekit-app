@@ -9,10 +9,27 @@ using namespace std::chrono_literals;
 
 namespace remote_app {
 Session::Session(bool fixture, std::shared_ptr<sdk::ControlInputSink> sink) : fixture_(fixture) {
-  if (fixture && !sink)
-    throw std::invalid_argument("Fixture requires recording input sink");
-  control_ =
-      std::make_shared<sdk::RemoteControlSession>(sink ? sink : sdk::make_platform_control_input());
+  if (fixture && !sink) {
+    failure_ = sdk::make_failure(sdk::ErrorDomain::lifecycle, sdk::ErrorCode::invalid_argument,
+                                 "Fixture requires recording input sink");
+  } else if (!sink) {
+    auto created = sdk::make_platform_control_input();
+    if (!created) {
+      failure_ = created.failure_record();
+    } else {
+      sink = *std::move(created);
+    }
+  }
+  control_ = std::make_shared<sdk::RemoteControlSession>(std::move(sink));
+  if (!failure_) {
+    auto ready = control_->check();
+    if (!ready) {
+      failure_ = ready.failure_record();
+    }
+  }
+  if (failure_) {
+    snapshot_.error = failure_->message;
+  }
 }
 
 Session::~Session() {
@@ -27,6 +44,9 @@ Snapshot Session::snapshot() const {
 }
 
 void Session::start(std::string url) {
+  if (failure_) {
+    return;
+  }
   if (!snapshot().finished)
     return;
   if (worker_.joinable())
@@ -154,87 +174,135 @@ void Session::media(std::string url, std::string id, std::string credential) {
   };
   std::unique_ptr<RtcConnection> connection_media;
   try {
-    sdk::Json empty = sdk::Json::object();
-    auto connection = request(url, "/api/v1/remote-control/control-grants/" + id + "/connect",
-                              credential, &empty);
-    if (stop_)
-      return;
-    sdk::ControlGrant grant;
-    {
-      std::lock_guard lock(mutex_);
-      grant = grant_;
-    }
-    connection_media =
-        std::make_unique<RtcConnection>(connection.at("media_url"), connection.at("media_token"),
-                                        grant.controller_identity, false, stop_);
-    auto layout = fixture_ ? sdk::ControlLayout{1, 0, 0, 1280, 720} : sdk::primary_control_layout();
-    const auto height =
-        std::max(2, static_cast<int>(1280.0 * layout.height / layout.width) / 2 * 2);
-    connection_media->publish_screen(1280, height, fixture_);
-    trace("room_joined");
-    {
-      std::lock_guard lock(mutex_);
+    const auto run_media = [&]() -> sdk::Result<void> {
+      sdk::Json empty = sdk::Json::object();
+      auto connection = request(url, "/api/v1/remote-control/control-grants/" + id + "/connect",
+                                credential, &empty);
       if (stop_)
-        return;
-      grant = grant_;
-      control_->authorize(grant, layout);
-    }
-    std::deque<std::future<void>> sends;
-    auto next = sdk::ControlClock::now();
-    while (!stop_) {
-      connection_media->poll();
-      auto packets = connection_media->take_data();
+        return sdk::Result<void>::success();
+      sdk::ControlGrant grant;
       {
         std::lock_guard lock(mutex_);
         grant = grant_;
       }
-      if (!control_->renew(grant)) {
-        throw std::runtime_error(control_->reason());
+      connection_media =
+          std::make_unique<RtcConnection>(connection.at("media_url"), connection.at("media_token"),
+                                          grant.controller_identity, false, stop_);
+      auto ready = connection_media->status();
+      if (!ready) {
+        return ready;
       }
-      for (auto& [bytes, params] : packets) {
-        trace("data_received",
-              {{"bytes", bytes.size()}, {"topic", params.topic}, {"reliable", params.reliable}});
-        auto accepted = control_->receive(bytes, params);
-        trace("control_packet", {{"accepted", accepted}, {"active", control_->active()}});
+      auto layout_result =
+          fixture_
+              ? sdk::Result<sdk::ControlLayout>::success(sdk::ControlLayout{1, 0, 0, 1280, 720})
+              : sdk::primary_control_layout();
+      if (!layout_result) {
+        return sdk::Result<void>::failure(layout_result.failure_record());
       }
-      if (!control_->active()) {
-        if (control_->reason() == "peer_stopped") {
-          stop_ = true;
-          break;
+      auto layout = *layout_result;
+      const auto height =
+          std::max(2, static_cast<int>(1280.0 * layout.height / layout.width) / 2 * 2);
+      auto published = connection_media->publish_screen(1280, height, fixture_);
+      if (!published) {
+        return published;
+      }
+      trace("room_joined");
+      {
+        std::lock_guard lock(mutex_);
+        if (stop_)
+          return sdk::Result<void>::success();
+        grant = grant_;
+        auto authorized = control_->authorize(grant, layout);
+        if (!authorized) {
+          return authorized;
         }
-        throw std::runtime_error(control_->reason());
       }
-      while (!sends.empty() && sends.front().wait_for(0ms) == std::future_status::ready) {
-        sends.front().get();
-        sends.pop_front();
-        trace("status_sent");
-      }
-      if (sends.size() >= 8)
-        throw std::runtime_error("Control status send queue stalled");
-      if (sdk::ControlClock::now() >= next) {
-        if (!fixture_) {
-          if (!sdk::control_permissions().ready())
-            throw std::runtime_error("权限或交互会话已失效");
-          auto current = sdk::primary_control_layout();
-          current.version = layout.version;
-          if (current != layout) {
-            current.version++;
-            layout = current;
-            control_->set_layout(layout);
+      std::deque<std::future<sdk::Result<void>>> sends;
+      auto next = sdk::ControlClock::now();
+      while (!stop_) {
+        auto polled = connection_media->poll();
+        if (!polled) {
+          return polled;
+        }
+        auto packets = connection_media->take_data();
+        if (!packets) {
+          return sdk::Result<void>::failure(packets.failure_record());
+        }
+        {
+          std::lock_guard lock(mutex_);
+          grant = grant_;
+        }
+        if (!control_->renew(grant)) {
+          return sdk::Result<void>::failure(sdk::make_failure(
+              sdk::ErrorDomain::lifecycle, sdk::ErrorCode::request_failed, control_->reason()));
+        }
+        for (auto& [bytes, params] : *packets) {
+          trace("data_received",
+                {{"bytes", bytes.size()}, {"topic", params.topic}, {"reliable", params.reliable}});
+          auto accepted = control_->receive(bytes, params);
+          trace("control_packet", {{"accepted", accepted}, {"active", control_->active()}});
+        }
+        if (!control_->active()) {
+          if (control_->reason() == "peer_stopped") {
+            stop_ = true;
+            break;
           }
+          return sdk::Result<void>::failure(sdk::make_failure(
+              sdk::ErrorDomain::lifecycle, sdk::ErrorCode::request_failed, control_->reason()));
         }
-        auto raw = control_->status().dump();
-        sends.push_back(connection_media->send({raw.begin(), raw.end()}));
-        next = sdk::ControlClock::now() + 500ms;
+        while (!sends.empty() && sends.front().wait_for(0ms) == std::future_status::ready) {
+          auto sent = sends.front().get();
+          if (!sent) {
+            return sent;
+          }
+          sends.pop_front();
+          trace("status_sent");
+        }
+        if (sends.size() >= 8)
+          return sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::lifecycle,
+                                                              sdk::ErrorCode::request_failed,
+                                                              "Control status send queue stalled"));
+        if (sdk::ControlClock::now() >= next) {
+          if (!fixture_) {
+            if (!sdk::control_permissions().ready())
+              return sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::lifecycle,
+                                                                  sdk::ErrorCode::request_failed,
+                                                                  "权限或交互会话已失效"));
+            auto measured = sdk::primary_control_layout();
+            if (!measured) {
+              return sdk::Result<void>::failure(measured.failure_record());
+            }
+            auto current = *measured;
+            current.version = layout.version;
+            if (current != layout) {
+              current.version++;
+              layout = current;
+              auto updated = control_->set_layout(layout);
+              if (!updated) {
+                return updated;
+              }
+            }
+          }
+          auto raw = control_->status().dump();
+          sends.push_back(connection_media->send({raw.begin(), raw.end()}));
+          next = sdk::ControlClock::now() + 500ms;
+        }
+        std::this_thread::sleep_for(10ms);
       }
-      std::this_thread::sleep_for(10ms);
+      control_->stop("media_ended");
+      return connection_media->close();
+    };
+    const auto outcome = run_media();
+    if (!outcome) {
+      const bool cancelled = stop_.exchange(true);
+      control_->stop("media_error");
+      if (!cancelled && outcome.error().code != sdk::ErrorCode::session_closed) {
+        std::lock_guard lock(mutex_);
+        snapshot_.error = outcome.failure_record()->message;
+      }
+    } else {
+      stop_ = true;
     }
-    control_->stop("media_ended");
-    connection_media->close();
-    stop_ = true;
-  } catch (const ConnectionEnded&) {
-    control_->stop("media_ended");
-    stop_ = true;
   } catch (const std::exception& e) {
     const bool cancelled = stop_.exchange(true);
     trace("media_failed", {{"reason", control_->reason()}});
@@ -246,13 +314,14 @@ void Session::media(std::string url, std::string id, std::string credential) {
   }
   // Release held input before any potentially blocking graph/transport teardown.
   control_->stop("media_ended");
-  if (connection_media)
-    try {
-      connection_media->close();
-    } catch (const std::exception& e) {
+  if (connection_media) {
+    auto closed = connection_media->close();
+    if (!closed) {
       std::lock_guard lock(mutex_);
-      if (snapshot_.error.empty())
-        snapshot_.error = e.what();
+      if (snapshot_.error.empty()) {
+        snapshot_.error = closed.failure_record()->message;
+      }
     }
+  }
 }
 }  // namespace remote_app

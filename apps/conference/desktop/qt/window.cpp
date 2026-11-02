@@ -417,14 +417,18 @@ void Window::login() {
 }
 
 void Window::refreshDevices() {
-  try {
-    cameras_ = demo::sdk::video_capture_devices();
-    screens_ = demo::sdk::screen_capture_devices();
-    if (cameraIndex_ >= int(cameras_.size()))
-      cameraIndex_ = 0;
-  } catch (const std::exception& e) {
-    message(str(e.what()));
-  }
+  auto cameras = demo::sdk::video_capture_devices();
+  auto screens = demo::sdk::screen_capture_devices();
+  if (!cameras)
+    message(str(cameras.error().message));
+  else
+    cameras_ = std::move(*cameras);
+  if (!screens)
+    message(str(screens.error().message));
+  else
+    screens_ = std::move(*screens);
+  if (cameraIndex_ >= int(cameras_.size()))
+    cameraIndex_ = 0;
 }
 
 void Window::settings() {
@@ -788,8 +792,12 @@ void Window::applyBusiness(QJsonObject state) {
           spec.capture = demo::sdk::CaptureKind::screen;
           spec.screen_id = s.id;
           auto size = demo::sdk::screen_capture_size(s.width, s.height);
-          spec.width = size.width;
-          spec.height = size.height;
+          if (!size) {
+            message(str(size.error().message));
+            continue;
+          }
+          spec.width = size->width;
+          spec.height = size->height;
           spec.fps = 15;
           spec.local_preview = true;
           if (!session_.add_video(spec))

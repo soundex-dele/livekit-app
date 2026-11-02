@@ -1,6 +1,4 @@
 #include "rtc_blocking_bridge.hpp"
-#include "rtc_result.hpp"
-using livekit::sdk::app_support::require_result;
 #include "livekit/rtc/livekit.hpp"
 #include "services/rtc_connection.hpp"
 #include <algorithm>
@@ -8,30 +6,57 @@ using livekit::sdk::app_support::require_result;
 namespace remote_app {
 using namespace std::chrono_literals;
 
+namespace {
+template <class T, class Start>
+sdk::Result<T> complete(Start start) {
+  std::promise<sdk::Result<T>> completion;
+  auto future = completion.get_future();
+  start([&completion](sdk::Result<T> value) { completion.set_value(std::move(value)); });
+  return future.get();
+}
+}  // namespace
+
 RtcConnection::RtcConnection(std::string url, std::string token, std::string peer,
                              bool receive_video, const std::atomic<bool>& stop)
-    : engine_(require_result(
-          livekit::sdk::app_support::create_blocking_engine(livekit::sdk::rtc::AudioOutputOptions{}))),
-      engine_events_(*engine_),
-      data_events_(require_result(engine_->room().services())),
-      peer_(std::move(peer)),
-      stop_(stop),
-      receive_video_(receive_video) {
+    : peer_(std::move(peer)), stop_(stop), receive_video_(receive_video) {
+  auto created = sdk::app_support::create_blocking_engine(rtc::AudioOutputOptions{});
+  if (!created) {
+    failure_ = created.failure_record();
+    return;
+  }
+  engine_ = *std::move(created);
+  engine_events_.attach(*engine_);
+  if (auto status = engine_events_.status(); !status) {
+    failure_ = status.failure_record();
+    return;
+  }
   rtc::LiveKitRoomOptions options;
   options.url = std::move(url);
   options.token = token;
   options.connect_timeout = 10;
   options.operation_timeout = 10s;
   options.reconnect.enabled = false;
-  try {
-    auto joining = engine_->join(options);
-    await(joining);
-  } catch (const std::exception& error) {
-    std::string message = error.what();
-    if (!token.empty())
-      for (size_t pos; (pos = message.find(token)) != std::string::npos;)
-        message.replace(pos, token.size(), "[redacted]");
-    throw std::runtime_error(message);
+  auto joining = complete<rtc::RoomSnapshot>(
+      [&](auto done) { engine_->raw().join(options, std::move(done)); });
+  if (!joining) {
+    auto failure = *joining.failure_record();
+    if (!token.empty()) {
+      for (size_t pos; (pos = failure.message.find(token)) != std::string::npos;) {
+        failure.message.replace(pos, token.size(), "[redacted]");
+      }
+    }
+    failure_ = std::make_shared<const sdk::FailureInfo>(std::move(failure));
+    return;
+  }
+  auto services = engine_->room().services();
+  if (!services) {
+    failure_ = services.failure_record();
+    return;
+  }
+  data_events_ = std::make_unique<sdk::app_support::DataEventMailbox>(*services);
+  if (auto status = data_events_->status(); !status) {
+    failure_ = status.failure_record();
+    return;
   }
   if (auto state = engine_->room().snapshot().session)
     for (const auto& [sid, participant] : state->remote)
@@ -40,23 +65,28 @@ RtcConnection::RtcConnection(std::string url, std::string token, std::string pee
 }
 
 RtcConnection::~RtcConnection() {
-  try {
-    close();
-  } catch (...) {
-  }
+  (void)close();
+}
+
+sdk::Result<void> RtcConnection::status() const {
+  return failure_ ? sdk::Result<void>::failure(failure_) : sdk::Result<void>::success();
 }
 
 bool RtcConnection::connected() const {
-  return !closed_ && engine_->room().snapshot().state == rtc::ConnectionState::connected;
+  return !failure_ && !closed_ && engine_ &&
+         engine_->room().snapshot().state == rtc::ConnectionState::connected;
 }
 
-void RtcConnection::close() {
-  if (closed_)
-    return;
+sdk::Result<void> RtcConnection::close() {
+  if (closed_) {
+    return sdk::Result<void>::success();
+  }
   closed_ = true;
-  require_result(engine_->close());
+  auto result = engine_ ? complete<void>([&](auto done) { engine_->raw().leave(std::move(done)); })
+                        : sdk::Result<void>::success();
   std::lock_guard lock(frames_mutex_);
   frames_.clear();
+  return result;
 }
 
 bool RtcConnection::owned(const std::string& sid) const {
@@ -70,7 +100,7 @@ bool RtcConnection::owned(const std::string& sid) const {
   return false;
 }
 
-void RtcConnection::publish_screen(int width, int height, bool generated) {
+sdk::Result<void> RtcConnection::publish_screen(int width, int height, bool generated) {
   rtc::TrackDescriptor d;
   d.id = "screen";
   d.name = "Screen";
@@ -87,41 +117,73 @@ void RtcConnection::publish_screen(int width, int height, bool generated) {
   rtc::engine::MediaPublishSpec config;
   config.track = d;
   config.input = input;
-  auto publication = require_result(engine_->publish_video(std::move(config)));
+  if (!status()) {
+    return status();
+  }
+  auto publication = engine_->publish_video(std::move(config));
+  return publication ? sdk::Result<void>::success()
+                     : sdk::Result<void>::failure(publication.failure_record());
 }
 
-void RtcConnection::subscribe(const rtc::TrackDescriptor& d) {
+sdk::Result<void> RtcConnection::subscribe(const rtc::TrackDescriptor& d) {
   rtc::engine::MediaSubscribeSpec config;
   config.track = d;
-  config.output.video = [this, id = d.id](const auto& frame) {
+  config.output.video = [this, id = d.id](const auto& frame) -> sdk::Result<void> {
     if (stop_)
-      return;
+      return sdk::Result<void>::success();
     std::lock_guard lock(frames_mutex_);
     frames_[id] = frame.pixels;
+    return sdk::Result<void>::success();
   };
-  auto subscription = require_result(engine_->subscribe_media(std::move(config)));
+  auto subscription = engine_->subscribe_media(std::move(config));
+  if (!subscription) {
+    return sdk::Result<void>::failure(subscription.failure_record());
+  }
   subscriptions_.insert(d.id);
+  return sdk::Result<void>::success();
 }
 
-void RtcConnection::poll() {
-  while (auto event = engine_events_.take_event(0ms)) {
+sdk::Result<void> RtcConnection::poll() {
+  if (!status()) {
+    return status();
+  }
+  while (true) {
+    auto received = engine_events_.take_event(0ms);
+    if (!received) {
+      return sdk::Result<void>::failure(received.failure_record());
+    }
+    auto event = *std::move(received);
+    if (!event) {
+      break;
+    }
     if (event->kind == rtc::RoomEventKind::closed)
-      throw ConnectionEnded("Media connection ended");
+      return sdk::Result<void>::failure(sdk::make_failure(
+          sdk::ErrorDomain::transport, sdk::ErrorCode::session_closed, "Media connection ended"));
     if (event->kind == rtc::RoomEventKind::failed ||
         event->kind == rtc::RoomEventKind::reconnecting)
-      throw std::runtime_error("Media connection ended; request a new control grant");
+      return sdk::Result<void>::failure(
+          sdk::make_failure(sdk::ErrorDomain::transport, sdk::ErrorCode::connection_lost,
+                            "Media connection ended; request a new control grant"));
     if (event->kind == rtc::RoomEventKind::remote_track_added && event->descriptor &&
         receive_video_ && event->descriptor->kind == rtc::MediaKind::video) {
       if (discovered_.size() >= 2)
-        throw std::runtime_error("Too many remote screen tracks");
+        return sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::transport,
+                                                            sdk::ErrorCode::connection_lost,
+                                                            "Too many remote screen tracks"));
       discovered_[event->track_id] = *event->descriptor;
     }
     if (event->kind == rtc::RoomEventKind::remote_track_removed ||
         event->kind == rtc::RoomEventKind::track_removed) {
       if (event->track_id == "screen")
-        throw std::runtime_error("Screen publication revoked");
+        return sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::transport,
+                                                            sdk::ErrorCode::connection_lost,
+                                                            "Screen publication revoked"));
       if (subscriptions_.contains(event->track_id)) {
-        require_result(engine_->unsubscribe(event->track_id));
+        auto removed = complete<void>(
+            [&](auto done) { engine_->raw().unsubscribe(event->track_id, std::move(done)); });
+        if (!removed) {
+          return removed;
+        }
         subscriptions_.erase(event->track_id);
         std::lock_guard lock(frames_mutex_);
         frames_.erase(event->track_id);
@@ -135,44 +197,79 @@ void RtcConnection::poll() {
     for (const auto& [sid, participant] : state->remote)
       if (participant.identity == peer_) {
         if (!peer_sid_.empty() && peer_sid_ != sid)
-          throw ConnectionEnded("Control peer connection was replaced");
+          return sdk::Result<void>::failure(
+              sdk::make_failure(sdk::ErrorDomain::transport, sdk::ErrorCode::session_closed,
+                                "Control peer connection was replaced"));
         peer_sid_ = sid;
         present = true;
       }
   if (!peer_sid_.empty() && !present)
-    throw ConnectionEnded("Control peer disconnected");
+    return sdk::Result<void>::failure(sdk::make_failure(
+        sdk::ErrorDomain::transport, sdk::ErrorCode::session_closed, "Control peer disconnected"));
   for (const auto& [id, d] : discovered_)
     if (!subscriptions_.contains(id) && owned(d.remote_sid))
-      subscribe(d);
+      if (auto subscribed = subscribe(d); !subscribed) {
+        return subscribed;
+      }
 
-  if (auto failure = engine_events_.take_failure())
-    throw std::runtime_error(failure->message);
+  auto failure = engine_events_.take_failure();
+  if (!failure) {
+    return sdk::Result<void>::failure(failure.failure_record());
+  }
+  if (*failure) {
+    return sdk::Result<void>::failure((*failure)->failure
+                                          ? (*failure)->failure
+                                          : sdk::make_failure(sdk::ErrorDomain::media,
+                                                              sdk::ErrorCode::processing_failed,
+                                                              (*failure)->message));
+  }
+  return sdk::Result<void>::success();
 }
 
-std::vector<RtcConnection::Packet> RtcConnection::take_data() {
+sdk::Result<std::vector<RtcConnection::Packet>> RtcConnection::take_data() {
+  using Outcome = sdk::Result<std::vector<Packet>>;
+  if (!status()) {
+    return Outcome::failure(failure_);
+  }
   std::vector<Packet> packets;
   for (size_t count = 0; count < 256; ++count) {
-    auto event = data_events_.take_event(0ms);
+    auto received = data_events_->take_event(0ms);
+    if (!received) {
+      return Outcome::failure(received.failure_record());
+    }
+    auto event = *std::move(received);
     if (!event)
       break;
     if (const auto* error = std::get_if<rtc::DataServiceError>(&event->value))
-      throw std::runtime_error(error->message);
+      return Outcome::failure(error->failure ? error->failure
+                                             : sdk::make_failure(sdk::ErrorDomain::data,
+                                                                 sdk::ErrorCode::request_failed,
+                                                                 error->message));
     const auto* data = std::get_if<rtc::ReceivedData>(&event->value);
     if (!data || data->topic != sdk::remote_control_topic)
       continue;
     if (data->bytes.size() > 4096 || packets.size() >= 256)
-      throw std::runtime_error("Control input queue overflow");
+      return Outcome::failure(sdk::make_failure(sdk::ErrorDomain::data,
+                                                sdk::ErrorCode::resource_exhausted,
+                                                "Control input queue overflow"));
     packets.push_back({data->bytes, {event->sender_identity, data->topic, event->reliable}});
   }
-  return packets;
+  return Outcome::success(std::move(packets));
 }
 
-std::future<void> RtcConnection::send(std::vector<uint8_t> data) {
+std::future<sdk::Result<void>> RtcConnection::send(std::vector<uint8_t> data) {
   rtc::DataSendOptions options;
   options.topic = sdk::remote_control_topic;
   options.destinations = {peer_};
   options.operation.timeout = 2s;
-  return require_result(engine_->room().services())->send_data(std::move(data), options);
+  auto services = engine_ ? engine_->room().services()
+                          : sdk::Result<std::shared_ptr<rtc::RoomServices>>::failure(failure_);
+  if (!services) {
+    std::promise<sdk::Result<void>> completed;
+    completed.set_value(sdk::Result<void>::failure(services.failure_record()));
+    return completed.get_future();
+  }
+  return (*services)->send_data(std::move(data), options);
 }
 
 std::shared_ptr<const sdk::VideoFrame> RtcConnection::take_frame() {

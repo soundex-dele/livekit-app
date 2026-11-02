@@ -1,3 +1,4 @@
+#include "result_check.hpp"
 #include <livekit/studio.hpp>
 #include "../src/session.hpp"
 #include <av/http.hpp>
@@ -79,7 +80,7 @@ int main(int argc, char** argv) {
     session.start("测试直播 " + name);
     wait([&] { return session.snapshot().state == "直播中"; });
     if (!record.empty())
-      studio.start_recording(std::filesystem::u8path(record));
+      checked(studio.start_recording(std::filesystem::u8path(record)));
     auto ready = session.snapshot();
     std::cout << Json{{"event", "ready"},
                       {"broadcast", ready.broadcast},
@@ -108,7 +109,7 @@ int main(int argc, char** argv) {
               float(std::sin((samples + i) * 2 * 3.141592653589793 * 440 / 48000));
           frame.float_samples[i * 2] = frame.float_samples[i * 2 + 1] = value;
         }
-        studio.submit_remote_audio("tone", frame);
+        checked(studio.submit_remote_audio("tone", frame));
         samples += 480;
         next += std::chrono::milliseconds(10);
         int tick =

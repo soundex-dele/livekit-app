@@ -40,8 +40,8 @@ int main() {
 
       ~Cleanup() {
         try {
-          api.room().delete_room(room);
-          api.room().delete_room(room + "-other");
+          (void)api.room().delete_room(room);
+          (void)api.room().delete_room(room + "-other");
         } catch (...) {
         }
       }
@@ -52,16 +52,18 @@ int main() {
       o.connection.url = env("LIVEKIT_URL");
       o.room = room;
       o.audio_playout = false;
-      o.connection.token = api.room()
-                               .create_token()
-                               .set_identity(who)
-                               .set_name(who)
-                               .set_video_grant({{"roomJoin", true},
-                                                 {"room", room},
-                                                 {"canPublish", false},
-                                                 {"canPublishData", true},
-                                                 {"canSubscribe", true}})
-                               .to_jwt();
+      auto signed_token = api.room()
+                              .create_token()
+                              .set_identity(who)
+                              .set_name(who)
+                              .set_video_grant({{"roomJoin", true},
+                                                {"room", room},
+                                                {"canPublish", false},
+                                                {"canPublishData", true},
+                                                {"canSubscribe", true}})
+                              .to_jwt();
+      check(bool(signed_token), "Token creation failed");
+      o.connection.token = std::move(*signed_token);
       return o;
     };
     std::cerr << "chat: create sessions\n";

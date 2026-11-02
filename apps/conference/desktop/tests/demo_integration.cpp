@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
     sdk::LiveKitAPI api({url, {key, secret, ""}, false});
     const std::string name = "imgui-integration";
     std::filesystem::create_directories(std::filesystem::u8path(argv[1]));
-    api.room().create_room(name);
+    check(bool(api.room().create_room(name)), "Server API operation failed");
 
     struct Cleanup {
       sdk::LiveKitAPI& api;
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
 
       ~Cleanup() {
         try {
-          api.room().delete_room(name);
+          (void)api.room().delete_room(name);
         } catch (...) {
         }
       }
@@ -79,15 +79,17 @@ int main(int argc, char** argv) {
       demo::SessionOptions o;
       o.connection.url = url;
       o.room = name;
-      o.connection.token = api.room()
-                               .create_token()
-                               .set_identity(identity)
-                               .set_name(identity)
-                               .set_video_grant({{"roomJoin", true},
-                                                 {"room", name},
-                                                 {"canPublish", true},
-                                                 {"canSubscribe", true}})
-                               .to_jwt();
+      auto signed_token = api.room()
+                              .create_token()
+                              .set_identity(identity)
+                              .set_name(identity)
+                              .set_video_grant({{"roomJoin", true},
+                                                {"room", name},
+                                                {"canPublish", true},
+                                                {"canSubscribe", true}})
+                              .to_jwt();
+      check(bool(signed_token), "Token creation failed");
+      o.connection.token = std::move(*signed_token);
       return o;
     };
     sdk::MediaSpec video;
@@ -103,16 +105,18 @@ int main(int argc, char** argv) {
     const auto first_video = tracks(first, {}, true).front().sid;
     auto view = options("Viewer");
     view.record = std::filesystem::u8path(argv[1]);
-    view.connection.token = api.room()
-                                .create_token()
-                                .set_identity("Viewer")
-                                .set_name("Viewer")
-                                .set_video_grant({{"roomJoin", true},
-                                                  {"room", name},
-                                                  {"canPublish", false},
-                                                  {"canPublishData", false},
-                                                  {"canSubscribe", true}})
-                                .to_jwt();
+    auto signed_token = api.room()
+                            .create_token()
+                            .set_identity("Viewer")
+                            .set_name("Viewer")
+                            .set_video_grant({{"roomJoin", true},
+                                              {"room", name},
+                                              {"canPublish", false},
+                                              {"canPublishData", false},
+                                              {"canSubscribe", true}})
+                            .to_jwt();
+    check(bool(signed_token), "Token creation failed");
+    view.connection.token = std::move(*signed_token);
     view.audio_playout = env("LIVEKIT_DEMO_TEST_AUDIO") == "1";
     viewer.start(view);
     until(
@@ -135,7 +139,8 @@ int main(int argc, char** argv) {
                  s.frames.contains(second_video) && s.received_frames > 120;
         },
         "Two simultaneous video tracks missing");
-    api.room().mute_published_track(name, "Alice", first_video, true);
+    check(bool(api.room().mute_published_track(name, "Alice", first_video, true)),
+          "Server API operation failed");
     until(
         [&] {
           for (const auto& tile : demo::tiles(viewer.snapshot()))
@@ -144,7 +149,8 @@ int main(int argc, char** argv) {
           return false;
         },
         "Remote mute missing");
-    api.room().mute_published_track(name, "Alice", first_video, false);
+    check(bool(api.room().mute_published_track(name, "Alice", first_video, false)),
+          "Server API operation failed");
     until(
         [&] {
           for (const auto& tile : demo::tiles(viewer.snapshot()))
@@ -293,7 +299,7 @@ int main(int argc, char** argv) {
     view.media.clear();
     viewer.start(view);
     until([&] { return viewer.snapshot().state == demo::State::Connected; }, "Final connect");
-    api.room().remove_participant(name, "Viewer");
+    check(bool(api.room().remove_participant(name, "Viewer")), "Server API operation failed");
     until([&] { return viewer.snapshot().finished; }, "Server removal not observed");
     check(viewer.snapshot().state == demo::State::Error && viewer.snapshot().frames.empty(),
           "Server removal state");

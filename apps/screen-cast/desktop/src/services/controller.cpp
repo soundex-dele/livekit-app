@@ -4,21 +4,25 @@
 
 namespace screen_cast {
 QImage convertFrame(const livekit::sdk::VideoFrame& f, QSize limit) {
-  if (f.width <= 0 || f.height <= 0 || f.width > 16384 || f.height > 16384 || limit.isEmpty())
+  if (f.width <= 0 || f.height <= 0 || f.width > 16384 || f.height > 16384 || limit.isEmpty()) {
     throw std::invalid_argument("Invalid I420 dimensions");
+  }
   auto valid = [](const auto& p, int stride, int w, int h) {
     return stride >= w && p.size() >= size_t(stride) * h;
   };
   if (!valid(f.y, f.stride_y, f.width, f.height) ||
       !valid(f.u, f.stride_u, (f.width + 1) / 2, (f.height + 1) / 2) ||
-      !valid(f.v, f.stride_v, (f.width + 1) / 2, (f.height + 1) / 2))
+      !valid(f.v, f.stride_v, (f.width + 1) / 2, (f.height + 1) / 2)) {
     throw std::invalid_argument("Invalid I420 planes");
+  }
   auto size = QSize(f.width, f.height);
-  if (size.width() > limit.width() || size.height() > limit.height())
+  if (size.width() > limit.width() || size.height() > limit.height()) {
     size.scale(limit, Qt::KeepAspectRatio);
+  }
   QImage out(size, QImage::Format_RGB32);
-  if (out.isNull())
+  if (out.isNull()) {
     throw std::runtime_error("Cannot allocate preview");
+  }
   auto clip = [](int v) { return std::clamp(v, 0, 255); };
   for (int y = 0; y < size.height(); ++y) {
     auto* row = reinterpret_cast<QRgb*>(out.scanLine(y));
@@ -45,8 +49,9 @@ FrameConverter::FrameConverter()
           {
             std::unique_lock lock(mutex_);
             cv_.wait(lock, [this] { return dirty_ || stop_; });
-            if (stop_)
+            if (stop_) {
               return;
+            }
             frame = std::move(pending_);
             limit = limit_;
             epoch = epoch_;
@@ -54,14 +59,16 @@ FrameConverter::FrameConverter()
           }
           QImage result;
           try {
-            if (frame)
+            if (frame) {
               result = convertFrame(*frame, limit);
+            }
           } catch (const std::exception&) {
           }
           {
             std::lock_guard lock(mutex_);
-            if (epoch == epoch_)
+            if (epoch == epoch_) {
               ready_ = std::move(result);
+            }
           }
         }
       }) {}
@@ -77,8 +84,9 @@ FrameConverter::~FrameConverter() {
 
 void FrameConverter::submit(std::shared_ptr<const livekit::sdk::VideoFrame> frame, QSize limit) {
   std::lock_guard lock(mutex_);
-  if (frame == last_ && limit == limit_)
+  if (frame == last_ && limit == limit_) {
     return;
+  }
   last_ = frame;
   pending_ = std::move(frame);
   limit_ = limit;
@@ -104,8 +112,9 @@ Controller::Controller(Window& w, std::unique_ptr<Backend> b)
     : QObject(&w), window_(w), backend_(std::move(b)) {
   connect(&w, &Window::refreshRequested, this, [this] { refresh(); });
   connect(&w, &Window::startRequested, this, [this] {
-    if (closing_ || !backend_->snapshot().finished)
+    if (closing_ || !backend_->snapshot().finished) {
       return;
+    }
     converter_.clear();
     lastState_.clear();
     stopping_ = false;
@@ -141,13 +150,15 @@ Controller::Controller(Window& w, std::unique_ptr<Backend> b)
 Controller::~Controller() {
   timer_.stop();
   backend_->stop();
-  if (devices_.valid())
+  if (devices_.valid()) {
     devices_.wait();
+  }
 }
 
 void Controller::refresh() {
-  if (devices_.valid() || closing_ || !backend_->snapshot().finished)
+  if (devices_.valid() || closing_ || !backend_->snapshot().finished) {
     return;
+  }
   window_.showError({});
   window_.setEnumerating(true);
   try {
@@ -161,7 +172,13 @@ void Controller::refresh() {
 void Controller::tick() {
   if (devices_.valid() && devices_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
     try {
-      window_.setDevices(devices_.get());
+      auto listed = devices_.get();
+      if (listed) {
+        window_.setDevices(std::move(*listed));
+      } else {
+        window_.setDevices({});
+        window_.showError(readableError(listed.error().message));
+      }
     } catch (const std::exception& e) {
       window_.setDevices({});
       window_.showError(readableError(e.what()));

@@ -161,11 +161,11 @@ struct Window::Impl {
   Impl(Window* owner, WindowOptions cfg)
       : w(owner), config(std::move(cfg)), project(config.settings / "project.json") {
     if (std::filesystem::exists(project)) {
-      try {
-        scenes = sdk::Studio::load_project(project, selected, options, audio);
-      } catch (const std::exception& e) {
-        error = q(e.what());
-      }
+      auto loaded = sdk::Studio::load_project(project, selected, options, audio);
+      if (loaded)
+        scenes = std::move(*loaded);
+      else
+        error = q(loaded.error().message);
     }
     if (config.portrait) {
       options.width = 720;
@@ -253,15 +253,14 @@ struct Window::Impl {
   bool save() {
     if (!dirty)
       return true;
-    try {
-      sdk::Studio::save_project(project, scenes, selected, options, audio);
-      dirty = false;
-      return true;
-    } catch (const std::exception& e) {
-      error = q(e.what());
+    auto saved = sdk::Studio::save_project(project, scenes, selected, options, audio);
+    if (!saved) {
+      error = q(saved.error().message);
       errorLabel->setText(error);
       return false;
     }
+    dirty = false;
+    return true;
   }
 
   QPushButton* action(const QString& text, const QString& name, QBoxLayout* layout,
@@ -801,14 +800,12 @@ struct Window::Impl {
       info->setText(QStringLiteral("正在获取设备列表，请按系统提示授权…"));
       refresh->setEnabled(false);
       watcher->setFuture(QtConcurrent::run([k = requestKind]() -> DeviceResult {
-        try {
-          return {k == 0   ? sdk::studio_screens()
-                  : k == 1 ? sdk::studio_windows()
-                           : sdk::studio_cameras(),
-                  {}};
-        } catch (const std::exception& e) {
-          return {{}, q(e.what())};
-        }
+        auto devices = k == 0   ? sdk::studio_screens()
+                       : k == 1 ? sdk::studio_windows()
+                                : sdk::studio_cameras();
+        if (!devices)
+          return {{}, q(devices.error().message)};
+        return {std::move(*devices), {}};
       }));
       validate();
     };
@@ -957,7 +954,11 @@ struct Window::Impl {
       return;
     if (!file.endsWith(".mp4", Qt::CaseInsensitive))
       file += ".mp4";
-    session->engine()->start_recording(path(file));
+    auto started = session->engine()->start_recording(path(file));
+    if (!started) {
+      error = q(started.error().message);
+      errorLabel->setText(error);
+    }
   }
 
   void rebuildInteractions(const Snapshot& state) {

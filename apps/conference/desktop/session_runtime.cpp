@@ -1,6 +1,5 @@
 #include "rtc_blocking_bridge.hpp"
-#include "rtc_result.hpp"
-using livekit::sdk::app_support::require_result;
+#include "data_event_mailbox.hpp"
 #include "rtc_event_mailbox.hpp"
 #include "session.hpp"
 #include <livekit/rtc/engine.hpp>
@@ -12,6 +11,47 @@ namespace {
 using namespace rtc;
 using namespace std::chrono_literals;
 
+struct AppFailure {
+  sdk::Failure value;
+
+  template <class T>
+  operator sdk::Result<T>() const {
+    return sdk::Result<T>::failure(value);
+  }
+};
+
+AppFailure app_failed(sdk::Failure value) {
+  return {std::move(value)};
+}
+
+AppFailure app_failed(std::string text) {
+  return {sdk::make_failure(sdk::ErrorDomain::media, sdk::ErrorCode::processing_failed,
+                            std::move(text))};
+}
+
+sdk::Result<void> operation_result(sdk::ErrorCode code) {
+  return code == sdk::ErrorCode::ok
+             ? sdk::Result<void>::success()
+             : sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::lifecycle, code,
+                                                            "Conference operation failed"));
+}
+
+sdk::Result<void> operation_result(sdk::Result<void> result) {
+  return result;
+}
+
+#define CONF_TRY(expression)                      \
+  do {                                            \
+    auto result = operation_result(expression);   \
+    if (!result)                                  \
+      return app_failed(result.failure_record()); \
+  } while (false)
+#define CONF_ASSIGN(name, expression)                  \
+  auto name##_result = (expression);                   \
+  if (!name##_result)                                  \
+    return app_failed(name##_result.failure_record()); \
+  auto name = std::move(*name##_result)
+
 struct Track {
   TrackDescriptor descriptor;
   bool publication = false, ready = false;
@@ -21,9 +61,8 @@ struct Track {
     return publication ? media->snapshot().transport.server_sid : descriptor.remote_sid;
   }
 
-  void check() const {
-    if (media)
-      require_result(media->check());
+  sdk::Result<void> check() const {
+    return media ? operation_result(media->check()) : sdk::Result<void>::success();
   }
 };
 
@@ -82,24 +121,32 @@ void Session::start(SessionOptions options) {
             message.replace(pos, token.size(), "[redacted]");
         return message;
       };
-      try {
+      auto execute = [&]() -> sdk::Result<void> {
         std::map<TrackId, std::shared_ptr<Track>> tracks;
-        auto engine =
-            require_result(livekit::sdk::app_support::create_blocking_engine(livekit::sdk::rtc::AudioOutputOptions{}));
+        CONF_ASSIGN(engine, livekit::sdk::app_support::create_blocking_engine(
+                                livekit::sdk::rtc::AudioOutputOptions{}));
+        struct Close {
+          sdk::app_support::BlockingRtc* engine;
+          ~Close() {
+            (void)engine->close();
+          }
+        } close{engine.get()};
+        std::stop_callback cancel_join(stop, [raw = &engine->raw()] { raw->leave(); });
         livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
         // Only the supervisor owns engine control. Codec callbacks only replace an owned frame.
-        const auto await = [&](auto& result) { return require_result(std::move(result)); };
         options.connection.subscribe = false;
         options.connection.subscribe_tracks.clear();
         auto joining = engine->join(options.connection);
-        await(joining);
+        CONF_TRY(joining);
         if (const auto joined = engine->room().snapshot().session;
             !joined || (!options.room.empty() && joined->room.name != options.room))
-          throw std::runtime_error("Joined room does not match the requested room");
+          return app_failed("Joined room does not match the requested room");
         int video_number = 0;
         uint64_t track_number = 0;
-        const auto publish = [&](const sdk::MediaSpec& spec, bool microphone = false,
-                                 PublicationSource role = PublicationSource::unknown) {
+        const auto publish =
+            [&](const sdk::MediaSpec& spec, bool microphone = false,
+                PublicationSource role =
+                    PublicationSource::unknown) -> sdk::Result<std::shared_ptr<Track>> {
           auto track = std::make_shared<Track>();
           track->publication = true;
           auto& d = track->descriptor;
@@ -144,26 +191,27 @@ void Session::start(SessionOptions options) {
               std::lock_guard lock(mutex_);
               if (data_.state != State::Disconnecting)
                 data_.frames[id] = frame.pixels;
+              return sdk::Result<void>::success();
             };
-          auto operation = require_result(engine->publish_media(std::move(config)));
+          CONF_ASSIGN(operation, engine->publish_media(std::move(config)));
           track->media = std::move(operation.track);
           track->ready = true;
           tracks.emplace(d.id, track);
-          return track;
+          return sdk::Result<std::shared_ptr<Track>>::success(std::move(track));
         };
         for (const auto& media : options.media) {
-          auto track = publish(media);
+          CONF_ASSIGN(track, publish(media));
           track->ready = true;
         }
         if (options.microphone) {
           sdk::MediaSpec spec;
           spec.video = false;
-          auto track = publish(spec, true);
+          CONF_ASSIGN(track, publish(spec, true));
           track->ready = true;
         }
-        const auto subscribe = [&](TrackDescriptor descriptor) {
+        const auto subscribe = [&](TrackDescriptor descriptor) -> sdk::Result<void> {
           if (tracks.contains(descriptor.id))
-            return;
+            return sdk::Result<void>::success();
           auto track = std::make_shared<Track>();
           track->descriptor = descriptor;
           engine::MediaSubscribeSpec config;
@@ -176,51 +224,65 @@ void Session::start(SessionOptions options) {
                 data_.frames[sid] = frame.pixels;
                 ++data_.received_frames;
               }
+              return sdk::Result<void>::success();
             };
           else {
             config.output.playout = options.audio_playout;
             config.output.audio = [this](const auto& frame) {
               std::lock_guard lock(mutex_);
               if (data_.state == State::Disconnecting || !frame.pcm)
-                return;
+                return sdk::Result<void>::success();
               ++data_.received_audio_frames;
               if (std::any_of(frame.pcm->samples.begin(), frame.pcm->samples.end(),
                               [](int sample) { return sample > 100 || sample < -100; }))
                 ++data_.non_silent_audio_frames;
+              return sdk::Result<void>::success();
             };
           }
-          auto operation = require_result(engine->subscribe_media(std::move(config)));
+          CONF_ASSIGN(operation, engine->subscribe_media(std::move(config)));
           track->media = std::move(operation.track);
           track->ready = true;
           tracks.emplace(descriptor.id, std::move(track));
+          return sdk::Result<void>::success();
         };
-        auto services = require_result(engine->room().services());
-        services->set_event_handler([this, room = engine->room()](const DataEvent& event) {
+        CONF_ASSIGN(services, engine->room().services());
+        sdk::app_support::DataEventMailbox data_events(services);
+        auto handle_data = [&](const DataEvent& event) {
           const auto* message = std::get_if<ReceivedData>(&event.value);
-          if (!message || message->topic != chat_topic) { return; }
-          const auto state = room.snapshot().session;
-          if (!state) { return; }
-          const auto sender = std::find_if(state->remote.begin(), state->remote.end(),
+          if (!message || message->topic != chat_topic) {
+            return;
+          }
+          const auto state = engine->snapshot().session;
+          if (!state) {
+            return;
+          }
+          const auto sender = std::find_if(
+              state->remote.begin(), state->remote.end(),
               [&](const auto& row) { return row.second.identity == event.sender_identity; });
-          if (sender == state->remote.end()) { return; }
+          if (sender == state->remote.end()) {
+            return;
+          }
           std::lock_guard lock(mutex_);
           if (data_.state != State::Disconnecting) {
             data_.chat.receive(message->bytes,
-                {event.sender_identity, message->topic, event.reliable},
-                sender->second.name, state->local.identity);
+                               {event.sender_identity, message->topic, event.reliable},
+                               sender->second.name, state->local.identity);
           }
-        });
-        std::future<void> chat_send;
+        };
+        std::future<sdk::Result<void>> chat_send;
         std::string sending_id;
         while (!stop.stop_requested()) {
-          while (auto event = engine_events.take_event(0ms)) {
+          for (;;) {
+            CONF_ASSIGN(event, engine_events.take_event(0ms));
+            if (!event)
+              break;
             if (event->kind == RoomEventKind::remote_track_added && event->descriptor)
-              subscribe(*event->descriptor);
+              CONF_TRY(subscribe(*event->descriptor));
             else if (event->kind == RoomEventKind::track_removed) {
               if (auto found = tracks.find(event->track_id); found != tracks.end()) {
                 auto removing = found->second->publication ? engine->unpublish(found->first)
                                                            : engine->unsubscribe(found->first);
-                await(removing);
+                CONF_TRY(removing);
                 {
                   std::lock_guard lock(mutex_);
                   data_.frames.erase(found->first);
@@ -232,7 +294,7 @@ void Session::start(SessionOptions options) {
               auto found = tracks.find(event->track_id);
               if (found != tracks.end() && !found->second->publication) {
                 auto removing = engine->unsubscribe(found->first);
-                await(removing);
+                CONF_TRY(removing);
                 {
                   std::lock_guard lock(mutex_);
                   data_.frames.erase(found->second->sid());
@@ -250,24 +312,30 @@ void Session::start(SessionOptions options) {
               if (data_.state != State::Disconnecting)
                 data_.state = State::Reconnecting;
             } else if (event->kind == RoomEventKind::closed || event->kind == RoomEventKind::failed)
-              throw std::runtime_error(event->message.empty()
-                                           ? "Disconnected by server. Join again to reconnect."
-                                           : event->message);
+              return app_failed(event->message.empty()
+                                    ? "Disconnected by server. Join again to reconnect."
+                                    : event->message);
           }
 
-          while (auto failure = engine_events.take_failure()) {
+          for (;;) {
+            CONF_ASSIGN(failure, engine_events.take_failure());
+            if (!failure)
+              break;
             auto it = tracks.find(failure->id);
             if (it != tracks.end())
-              throw std::runtime_error("Track " + failure->id + ": " + failure->message);
+              return failure->failure
+                         ? app_failed(failure->failure)
+                         : app_failed("Track " + failure->id + ": " + failure->message);
           }
 
+          for (;;) {
+            CONF_ASSIGN(event, data_events.take_event(0ms));
+            if (!event)
+              break;
+            handle_data(*event);
+          }
           if (chat_send.valid() && chat_send.wait_for(0ms) == std::future_status::ready) {
-            bool confirmed = true;
-            try {
-              chat_send.get();
-            } catch (...) {
-              confirmed = false;
-            }
+            const bool confirmed = bool(chat_send.get());
             std::lock_guard lock(mutex_);
             data_.chat.complete(sending_id, confirmed);
             data_.sending_chat = false;
@@ -306,13 +374,13 @@ void Session::start(SessionOptions options) {
           if (command) {
             std::string failure;
             TrackId adding;
-            try {
+            auto change = [&]() -> sdk::Result<void> {
               if (command->remove_sid.empty()) {
                 sdk::MediaSpec spec;
                 spec.demo = !command->microphone;
                 spec.video = !command->microphone;
-                auto track = publish(command->source.value_or(spec), command->microphone,
-                                     command->publication_source);
+                CONF_ASSIGN(track, publish(command->source.value_or(spec), command->microphone,
+                                           command->publication_source));
                 adding = track->descriptor.id;
                 track->ready = true;
               } else {
@@ -321,23 +389,23 @@ void Session::start(SessionOptions options) {
                       return item.second->publication && item.second->sid() == command->remove_sid;
                     });
                 if (found == tracks.end())
-                  throw std::runtime_error("Publication no longer exists");
+                  return app_failed("Publication no longer exists");
                 if (command->muted) {
                   auto muting = engine->set_muted(found->first, *command->muted);
-                  await(muting);
+                  CONF_TRY(muting);
                 } else {
                   auto removing = engine->unpublish(found->first);
-                  await(removing);
+                  CONF_TRY(removing);
                   tracks.erase(found);
                 }
               }
-            } catch (const std::exception& e) {
-              failure = redact(e.what());
+              return sdk::Result<void>::success();
+            };
+            auto changed = change();
+            if (!changed) {
+              failure = redact(changed.error().message);
               if (!adding.empty()) {
-                try {
-                  require_result(engine->unpublish(adding));
-                } catch (...) {
-                }
+                (void)engine->unpublish(adding);
                 tracks.erase(adding);
               }
             }
@@ -369,9 +437,15 @@ void Session::start(SessionOptions options) {
           }
           std::this_thread::sleep_for(5ms);
         }
-        require_result(engine->close());
+        CONF_TRY(engine->close());
         for (const auto& [id, track] : tracks)
-          track->check();
+          CONF_TRY(track->check());
+        return sdk::Result<void>::success();
+      };
+      try {
+        auto result = execute();
+        if (!result)
+          error = redact(result.error().message);
       } catch (const std::exception& e) {
         error = redact(e.what());
       } catch (...) {
@@ -408,3 +482,6 @@ void Session::stop() {
   worker_.request_stop();
 }
 }  // namespace demo
+
+#undef CONF_TRY
+#undef CONF_ASSIGN

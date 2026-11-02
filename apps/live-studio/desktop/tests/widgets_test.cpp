@@ -1,3 +1,4 @@
+#include "result_check.hpp"
 #include "window.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -61,7 +62,8 @@ class WidgetsTest : public QObject {
       size_t selected = 0;
       sdk::StudioOptions options;
       sdk::StudioAudioSettings audio;
-      auto scenes = sdk::Studio::load_project(root / "project.json", selected, options, audio);
+      auto scenes =
+          checked(sdk::Studio::load_project(root / "project.json", selected, options, audio));
       QCOMPARE(scenes.size(), size_t(2));
       QCOMPARE(selected, size_t(1));
       QCOMPARE(scenes[0].sources[0].input, std::string("Qt 6 中文测试"));
@@ -89,7 +91,7 @@ class WidgetsTest : public QObject {
     scene.sources.push_back(camera);
     sdk::StudioAudioSettings audio;
     audio.microphone = audio.system = audio.monitor = true;
-    sdk::Studio::save_project(root / "project.json", {scene}, 0, {}, audio);
+    checked(sdk::Studio::save_project(root / "project.json", {scene}, 0, {}, audio));
     Window window({root, true, false});
     window.show();
     QTRY_VERIFY_WITH_TIMEOUT(window.mediaSnapshot().frames > 1, 10000);
@@ -97,7 +99,8 @@ class WidgetsTest : public QObject {
     QVERIFY(window.mediaSnapshot().error.empty());
     size_t selected = 0;
     sdk::StudioOptions options;
-    auto saved = sdk::Studio::load_project(root / "project.json", selected, options, audio);
+    auto saved =
+        checked(sdk::Studio::load_project(root / "project.json", selected, options, audio));
     QCOMPARE(saved[0].sources.size(), size_t(1));
     QVERIFY(audio.microphone && audio.system && audio.monitor);
   }

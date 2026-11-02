@@ -1,6 +1,4 @@
 #include "rtc_blocking_bridge.hpp"
-#include "rtc_result.hpp"
-using livekit::sdk::app_support::require_result;
 #include "rtc_event_mailbox.hpp"
 #include "livekit/rtc/livekit.hpp"
 #include "media_session.hpp"
@@ -12,6 +10,17 @@ namespace rtc = sdk::rtc;
 using namespace std::chrono_literals;
 
 namespace {
+sdk::Result<void> operation_result(sdk::ErrorCode code) {
+  if (code == sdk::ErrorCode::ok)
+    return sdk::Result<void>::success();
+  return sdk::Result<void>::failure(
+      sdk::make_failure(sdk::ErrorDomain::media, code, "Studio media operation failed"));
+}
+
+sdk::Result<void> operation_result(sdk::Result<void> result) {
+  return result;
+}
+
 struct Mailbox {
   std::mutex mutex;
   std::shared_ptr<const sdk::VideoFrame> video;
@@ -21,7 +30,7 @@ struct Mailbox {
 
 MediaSession::MediaSession(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Studio> studio,
                            bool interaction, const std::atomic<bool>& closing, Statistics stats) {
-  std::promise<void> started;
+  std::promise<sdk::Result<void>> started;
   auto ready = started.get_future();
   worker_ =
       std::jthread([this, options = std::move(options), studio = std::move(studio), interaction,
@@ -29,7 +38,7 @@ MediaSession::MediaSession(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk:
         run(std::move(options), std::move(studio), interaction, closing, std::move(stats),
             std::move(started));
       });
-  ready.get();
+  (void)ready.get();
 }
 
 MediaSession::~MediaSession() {
@@ -45,18 +54,33 @@ std::string MediaSession::error() const {
 
 void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Studio> studio,
                        bool interaction, const std::atomic<bool>& closing, Statistics stats,
-                       std::promise<void> started) {
+                       std::promise<sdk::Result<void>> started) {
   bool announced = false;
   std::unique_ptr<livekit::sdk::app_support::BlockingRtc> engine;
   std::map<rtc::TrackId, std::shared_ptr<Mailbox>> mailboxes;
   auto cancelled = [&] { return stop_.load() || closing.load(); };
-  const auto await = [&](auto& result) { return require_result(std::move(result)); };
-  try {
-    engine =
-        require_result(livekit::sdk::app_support::create_blocking_engine(livekit::sdk::rtc::AudioOutputOptions{}));
+  auto failure = [](std::string message) {
+    return sdk::Result<void>::failure(sdk::make_failure(
+        sdk::ErrorDomain::media, sdk::ErrorCode::processing_failed, std::move(message)));
+  };
+#define STUDIO_MEDIA_TRY(expr)                                    \
+  do {                                                            \
+    auto result = operation_result(expr);                         \
+    if (!result)                                                  \
+      return sdk::Result<void>::failure(result.failure_record()); \
+  } while (false)
+#define STUDIO_MEDIA_ASSIGN(name, expr)                                \
+  auto name##_result = (expr);                                         \
+  if (!name##_result)                                                  \
+    return sdk::Result<void>::failure(name##_result.failure_record()); \
+  auto name = std::move(*name##_result)
+  auto run_session = [&]() -> sdk::Result<void> {
+    STUDIO_MEDIA_ASSIGN(created, livekit::sdk::app_support::create_blocking_engine(
+                                     livekit::sdk::rtc::AudioOutputOptions{}));
+    engine = std::move(created);
     livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
     auto joining = engine->join(options);
-    await(joining);
+    STUDIO_MEDIA_TRY(joining);
     const auto canvas = studio->options();
     rtc::TrackDescriptor video;
     video.id = "video";
@@ -71,7 +95,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
     rtc::engine::MediaPublishSpec video_config;
     video_config.track = video;
     video_config.input = vi;
-    auto video_operation = require_result(engine->publish_video(std::move(video_config)));
+    STUDIO_MEDIA_ASSIGN(video_operation, engine->publish_video(std::move(video_config)));
     rtc::TrackDescriptor audio;
     audio.id = "audio";
     audio.name = "Studio audio";
@@ -85,22 +109,27 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
     rtc::engine::MediaPublishSpec audio_config;
     audio_config.track = audio;
     audio_config.input = ai;
-    auto audio_operation = require_result(engine->publish_audio(std::move(audio_config)));
+    STUDIO_MEDIA_ASSIGN(audio_operation, engine->publish_audio(std::move(audio_config)));
     connected_ = true;
-    started.set_value();
+    started.set_value(sdk::Result<void>::success());
     announced = true;
     bool ended = false;
     while (!cancelled() && !ended) {
-      if (auto failure = engine_events.take_failure())
-        throw std::runtime_error(failure->message);
-      while (auto event = engine_events.take_event(0ms)) {
+      STUDIO_MEDIA_ASSIGN(error, engine_events.take_failure());
+      if (error)
+        return error->failure ? sdk::Result<void>::failure(error->failure)
+                              : failure(error->message);
+      for (;;) {
+        STUDIO_MEDIA_ASSIGN(event, engine_events.take_event(0ms));
+        if (!event)
+          break;
         if (event->kind == rtc::RoomEventKind::closed) {
           ended = true;
           break;
         }
         if (event->kind == rtc::RoomEventKind::failed ||
             event->kind == rtc::RoomEventKind::reconnecting)
-          throw std::runtime_error("Studio media connection ended");
+          return failure("Studio media connection ended");
         if (event->kind == rtc::RoomEventKind::statistics && event->statistics && stats)
           stats(*event->statistics);
         if (event->kind == rtc::RoomEventKind::remote_track_added && interaction &&
@@ -116,6 +145,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
             config.output.video = [box](const auto& frame) {
               std::lock_guard lock(box->mutex);
               box->video = frame.pixels;
+              return sdk::Result<void>::success();
             };
           else
             config.output.audio = [box](const auto& frame) {
@@ -123,8 +153,9 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
               if (box->audio.size() == 10)
                 box->audio.pop_front();
               box->audio.push_back(frame);
+              return sdk::Result<void>::success();
             };
-          auto operation = require_result(engine->subscribe_media(std::move(config)));
+          STUDIO_MEDIA_ASSIGN(operation, engine->subscribe_media(std::move(config)));
         }
         if (event->kind == rtc::RoomEventKind::remote_track_removed ||
             event->kind == rtc::RoomEventKind::track_removed) {
@@ -133,7 +164,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
             break;
           }
           if (mailboxes.contains(event->track_id)) {
-            require_result(engine->unsubscribe(event->track_id));
+            STUDIO_MEDIA_TRY(engine->unsubscribe(event->track_id));
             mailboxes.erase(event->track_id);
             studio->remove_remote(event->track_id);
           }
@@ -151,7 +182,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
           blocks.swap(box->audio);
         }
         if (frame) {
-          studio->submit_remote_video(id, *frame);
+          STUDIO_MEDIA_TRY(studio->submit_remote_video(id, *frame));
           ++received_video_;
         }
         for (const auto& block : blocks) {
@@ -165,14 +196,22 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
           pcm.float_samples = block.pcm->float_samples;
           pcm.format = block.pcm->format == rtc::PcmFormat::s16 ? sdk::AudioSampleFormat::pcm16
                                                                 : sdk::AudioSampleFormat::float32;
-          studio->submit_remote_audio(id, pcm);
+          STUDIO_MEDIA_TRY(studio->submit_remote_audio(id, pcm));
           ++received_audio_;
         }
       }
       std::this_thread::sleep_for(5ms);
     }
+    return sdk::Result<void>::success();
+  };
+  sdk::Result<void> result = sdk::Result<void>::success();
+  try {
+    result = run_session();
   } catch (const std::exception& error) {
-    std::string message = error.what();
+    result = failure(error.what());
+  }
+  if (!result) {
+    std::string message = result.error().message;
     if (!options.token.empty())
       for (size_t pos; (pos = message.find(options.token)) != std::string::npos;)
         message.replace(pos, options.token.size(), "[redacted]");
@@ -181,16 +220,18 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
       error_ = message;
     }
     if (!announced)
-      started.set_exception(std::make_exception_ptr(std::runtime_error(message)));
+      started.set_value(std::move(result));
   }
-  if (engine)
-    try {
-      require_result(engine->close());
-    } catch (const std::exception& error) {
+  if (engine) {
+    auto closed = operation_result(engine->close());
+    if (!closed) {
       std::lock_guard lock(mutex_);
       if (error_.empty())
-        error_ = error.what();
+        error_ = closed.error().message;
     }
+  }
+#undef STUDIO_MEDIA_TRY
+#undef STUDIO_MEDIA_ASSIGN
   for (const auto& [id, box] : mailboxes)
     studio->remove_remote(id);
   connected_ = false;
