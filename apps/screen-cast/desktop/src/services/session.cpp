@@ -201,7 +201,7 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
                   current.insert(sid);
                 }
                 if (std::any_of(participants.begin(), participants.end(),
-                                [&](const auto& sid) { return !current.contains(sid); })) {
+                                [&](const auto& sid) { return !current.count(sid); })) {
                   stop_ = true;
                   break;
                 }

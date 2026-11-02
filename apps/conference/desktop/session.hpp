@@ -1,3 +1,4 @@
+#include "livekit/compat/thread.hpp"
 #include "livekit/rtc/livekit.hpp"
 #pragma once
 #include <livekit/rtc/types.hpp>
@@ -81,7 +82,7 @@ class Session {
  private:
   mutable std::mutex mutex_;
   Snapshot data_;
-  std::jthread worker_;
+  livekit::compat::jthread worker_;
 
   struct VideoCommand {
     std::string remove_sid;

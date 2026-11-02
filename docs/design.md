@@ -2,7 +2,7 @@
 
 客户端仓库承载多个独立业务 APP：远程控制、传屏，以及后续会议等。每个 APP 可包含 desktop、web、android、ios 等端，按实际实现建立目录。
 
-当前已实现 `apps/remote-control/desktop`（C++20、ImGui、SDL2）和 `apps/remote-control/web`（TypeScript、Vite）。产品入口、配置、构建目标、静态资源和发布产物分别归属各端。
+当前已实现 `apps/remote-control/desktop`（C++17、ImGui、SDL2）和 `apps/remote-control/web`（TypeScript、Vite）。产品入口、配置、构建目标、静态资源和发布产物分别归属各端。
 
 ## 依赖与目录
 

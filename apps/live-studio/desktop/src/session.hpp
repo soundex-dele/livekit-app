@@ -1,4 +1,5 @@
 #pragma once
+#include "livekit/compat/thread.hpp"
 #include <livekit/studio.hpp>
 #include "media_session.hpp"
 #include <nlohmann/json.hpp>
@@ -61,7 +62,7 @@ class Session {
   std::unique_ptr<ix::WebSocket> events_;
   int64_t sequence_ = 0;
   std::atomic<bool> closing_{false};
-  std::jthread worker_;
+  livekit::compat::jthread worker_;
   sdk::StudioScene scene_;
   sdk::StudioAudioSettings audio_;
 };

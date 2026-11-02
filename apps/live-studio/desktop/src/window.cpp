@@ -1,3 +1,4 @@
+#include "livekit/compat/algorithm.hpp"
 #include "window.hpp"
 #include <QApplication>
 #include <QCheckBox>
@@ -230,7 +231,7 @@ struct Window::Impl {
     auto runtime = scene();
     auto sound = audio;
     if (config.offline) {
-      std::erase_if(runtime.sources, [](const auto& i) {
+      livekit::compat::erase_if(runtime.sources, [](const auto& i) {
         return i.kind != sdk::StudioSourceKind::color && i.kind != sdk::StudioSourceKind::text &&
                i.kind != sdk::StudioSourceKind::image;
       });
@@ -516,7 +517,7 @@ struct Window::Impl {
     liveHeader->addWidget(online, 1);
     shareButton = action(QStringLiteral("观看地址"), "share", liveHeader, [this] {
       auto state = session->snapshot();
-      if (state.live.is_object() && state.live.contains("broadcast"))
+      if (state.live.is_object() && state.live.count("broadcast"))
         QApplication::clipboard()->setText(q(state.server_url + "/apps/live-studio/#room/" +
                                              state.live.at("broadcast").value("room", "")));
     });

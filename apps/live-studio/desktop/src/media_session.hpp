@@ -1,3 +1,4 @@
+#include "livekit/compat/thread.hpp"
 #include "livekit/rtc/livekit.hpp"
 #pragma once
 #include <livekit/rtc/engine.hpp>
@@ -48,6 +49,6 @@ class MediaSession {
   std::atomic<size_t> subscriptions_{0};
   mutable std::mutex mutex_;
   std::string error_;
-  std::jthread worker_;
+  livekit::compat::jthread worker_;
 };
 }  // namespace studio_app

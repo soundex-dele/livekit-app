@@ -1,3 +1,4 @@
+#include "livekit/compat/algorithm.hpp"
 #include "result_check.hpp"
 #include <livekit/studio.hpp>
 #include "../src/session.hpp"
@@ -51,8 +52,8 @@ int main(int argc, char** argv) {
     StudioScene scene;
     StudioSource bg;
     bg.id = "background";
-    bg.color = name.ends_with("b") ? std::array<float, 4>{.4f, .1f, .1f, 1}
-                                   : std::array<float, 4>{.1f, .15f, .3f, 1};
+    bg.color = livekit::compat::ends_with(name, "b") ? std::array<float, 4>{.4f, .1f, .1f, 1}
+                                                     : std::array<float, 4>{.1f, .15f, .3f, 1};
     scene.sources.push_back(bg);
     StudioSource marker;
     marker.id = "marker";

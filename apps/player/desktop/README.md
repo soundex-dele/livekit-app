@@ -1,6 +1,6 @@
 # Qt6 本地播放器
 
-C++20 / Qt6 Widgets 桌面应用，参考 PotPlayer 的紧凑布局，保留 Windows/macOS 原生标题栏。播放内核使用公共 `LiveKit::Player` API；SDK 继续通过 FFmpeg 解封装和软件解码，独立于 Qt、SDL、ImGui 和 WebRTC。
+C++17 / Qt6 Widgets 桌面应用，参考 PotPlayer 的紧凑布局，保留 Windows/macOS 原生标题栏。播放内核使用公共 `LiveKit::Player` API；SDK 继续通过 FFmpeg 解封装和软件解码，独立于 Qt、SDL、ImGui 和 WebRTC。
 
 ## 功能
 
@@ -17,7 +17,7 @@ C++20 / Qt6 Widgets 桌面应用，参考 PotPlayer 的紧凑布局，保留 Win
 
 ## 依赖和构建
 
-需要 CMake 3.24+、C++20 编译器、Qt 6.8+（Widgets / Multimedia / Svg，测试还需 Test）及匹配的 FFmpeg 开发包。测试使用 `ffmpeg` 命令行生成短素材，播放器本身不通过子进程播放。原 ImGui/SDL 界面已替换，无需下载它们。
+需要 CMake 3.24+、C++17 编译器、Qt 6.8+（Widgets / Multimedia / Svg，测试还需 Test）及匹配的 FFmpeg 开发包。测试使用 `ffmpeg` 命令行生成短素材，播放器本身不通过子进程播放。原 ImGui/SDL 界面已替换，无需下载它们。
 
 ### macOS
 

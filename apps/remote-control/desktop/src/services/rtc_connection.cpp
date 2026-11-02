@@ -95,7 +95,7 @@ bool RtcConnection::owned(const std::string& sid) const {
     return false;
   for (const auto& [id, participant] : state->remote)
     if (participant.identity == peer_ && (peer_sid_.empty() || id == peer_sid_) &&
-        participant.publications.contains(sid))
+        participant.publications.count(sid))
       return true;
   return false;
 }
@@ -178,7 +178,7 @@ sdk::Result<void> RtcConnection::poll() {
         return sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::transport,
                                                             sdk::ErrorCode::connection_lost,
                                                             "Screen publication revoked"));
-      if (subscriptions_.contains(event->track_id)) {
+      if (subscriptions_.count(event->track_id)) {
         auto removed = complete<void>(
             [&](auto done) { engine_->raw().unsubscribe(event->track_id, std::move(done)); });
         if (!removed) {
@@ -207,7 +207,7 @@ sdk::Result<void> RtcConnection::poll() {
     return sdk::Result<void>::failure(sdk::make_failure(
         sdk::ErrorDomain::transport, sdk::ErrorCode::session_closed, "Control peer disconnected"));
   for (const auto& [id, d] : discovered_)
-    if (!subscriptions_.contains(id) && owned(d.remote_sid))
+    if (!subscriptions_.count(id) && owned(d.remote_sid))
       if (auto subscribed = subscribe(d); !subscribed) {
         return subscribed;
       }

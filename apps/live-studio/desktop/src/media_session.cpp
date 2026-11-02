@@ -1,3 +1,4 @@
+#include "livekit/compat/thread.hpp"
 #include "rtc_blocking_bridge.hpp"
 #include "rtc_event_mailbox.hpp"
 #include "livekit/rtc/livekit.hpp"
@@ -32,9 +33,9 @@ MediaSession::MediaSession(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk:
                            bool interaction, const std::atomic<bool>& closing, Statistics stats) {
   std::promise<sdk::Result<void>> started;
   auto ready = started.get_future();
-  worker_ =
-      std::jthread([this, options = std::move(options), studio = std::move(studio), interaction,
-                    &closing, stats = std::move(stats), started = std::move(started)]() mutable {
+  worker_ = livekit::compat::jthread(
+      [this, options = std::move(options), studio = std::move(studio), interaction, &closing,
+       stats = std::move(stats), started = std::move(started)]() mutable {
         run(std::move(options), std::move(studio), interaction, closing, std::move(stats),
             std::move(started));
       });
@@ -135,7 +136,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
         if (event->kind == rtc::RoomEventKind::remote_track_added && interaction &&
             event->descriptor) {
           const auto d = *event->descriptor;
-          if (mailboxes.contains(d.id))
+          if (mailboxes.count(d.id))
             continue;
           auto box = std::make_shared<Mailbox>();
           mailboxes.emplace(d.id, box);
@@ -163,7 +164,7 @@ void MediaSession::run(rtc::LiveKitRoomOptions options, std::shared_ptr<sdk::Stu
             ended = true;
             break;
           }
-          if (mailboxes.contains(event->track_id)) {
+          if (mailboxes.count(event->track_id)) {
             STUDIO_MEDIA_TRY(engine->unsubscribe(event->track_id));
             mailboxes.erase(event->track_id);
             studio->remove_remote(event->track_id);

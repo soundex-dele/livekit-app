@@ -2,7 +2,7 @@
 
 AV Platform 的客户端应用仓库。
 
-已实现首版远程协助：`apps/remote-control/desktop/` 为 C++20 + ImGui + SDL2 被控端，`apps/remote-control/web/` 为 TypeScript + Vite 浏览器控制端。构建、启动及验收边界见 [远控运行文档](../docs/integration/remote-control/README.md)。视频会议观看客户端和本地文件播放器已从 SDK 迁入；账号及完整会议业务流程尚未实现。
+已实现首版远程协助：`apps/remote-control/desktop/` 为 C++17 + ImGui + SDL2 被控端，`apps/remote-control/web/` 为 TypeScript + Vite 浏览器控制端。构建、启动及验收边界见 [远控运行文档](../docs/integration/remote-control/README.md)。视频会议观看客户端和本地文件播放器已从 SDK 迁入；账号及完整会议业务流程尚未实现。
 
 ## 设计文档
 

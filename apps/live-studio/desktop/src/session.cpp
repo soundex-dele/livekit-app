@@ -1,3 +1,5 @@
+#include "livekit/compat/algorithm.hpp"
+#include "livekit/compat/thread.hpp"
 #include "livekit/rtc/livekit.hpp"
 #include "session.hpp"
 #include <av/http.hpp>
@@ -22,7 +24,7 @@ Session::Session(std::filesystem::path settings, sdk::StudioOptions options, boo
     state_.error = e.what();
   }
   state_.server_url = url_;
-  worker_ = std::jthread([this] { run(); });
+  worker_ = livekit::compat::jthread([this] { run(); });
 }
 
 Session::~Session() {
@@ -62,10 +64,11 @@ void Session::login(std::string url, std::string name, std::string password, boo
            registration]() mutable {
     if (!broadcast_.empty())
       throw std::runtime_error("请先结束直播");
-    if (!url.starts_with("https://") && !url.starts_with("http://127.0.0.1:") &&
-        !url.starts_with("http://localhost:"))
+    if (!livekit::compat::starts_with(url, "https://") &&
+        !livekit::compat::starts_with(url, "http://127.0.0.1:") &&
+        !livekit::compat::starts_with(url, "http://localhost:"))
       throw std::runtime_error("公网服务请使用 HTTPS");
-    while (url.ends_with('/'))
+    while (livekit::compat::ends_with(url, '/'))
       url.pop_back();
     url_ = url;
     token_.clear();
@@ -298,7 +301,7 @@ void Session::events_start() {
   }
   auto ws = std::make_unique<ix::WebSocket>();
   auto address = url_;
-  if (address.starts_with("https:"))
+  if (livekit::compat::starts_with(address, "https:"))
     address.replace(0, 5, "wss");
   else
     address.replace(0, 4, "ws");

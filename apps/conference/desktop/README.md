@@ -1,6 +1,6 @@
 # AV 会议 · Qt Widgets 桌面客户端
 
-C++20 + Qt 6 Widgets 的自有会议产品，使用独立 RTC backend、逐轨 GraphEngine 和会议业务服务。Windows/macOS，单会最多 25 人。会议 GUI 不再使用 ImGui/SDL；其他 APP 的界面不受本产品构建影响。
+C++17 + Qt 6 Widgets 的自有会议产品，使用独立 RTC backend、逐轨 GraphEngine 和会议业务服务。Windows/macOS，单会最多 25 人。会议 GUI 不再使用 ImGui/SDL；其他 APP 的界面不受本产品构建影响。
 
 ## 功能
 

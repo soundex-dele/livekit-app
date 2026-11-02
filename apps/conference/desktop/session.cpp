@@ -1,3 +1,4 @@
+#include "livekit/compat/algorithm.hpp"
 #include "session.hpp"
 #include <set>
 #include <chrono>
@@ -40,7 +41,7 @@ void Snapshot::update(Participant local, const std::vector<Participant>& remote)
   }
   // Unknown/removed tracks cannot accumulate pixels indefinitely. A frame that
   // precedes metadata is replaced by the next decoded frame once subscribed.
-  std::erase_if(frames, [&](const auto& item) { return !current.contains(item.first); });
+  livekit::compat::erase_if(frames, [&](const auto& item) { return !current.count(item.first); });
 }
 
 std::vector<Tile> tiles(const Snapshot& s) {

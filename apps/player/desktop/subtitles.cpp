@@ -1,3 +1,4 @@
+#include "livekit/compat/algorithm.hpp"
 #include "subtitles.hpp"
 #include <algorithm>
 #include <cctype>
@@ -87,7 +88,7 @@ Subtitles Subtitles::parse(std::string_view input) {
   if (input.size() > max_file_size)
     throw std::runtime_error("字幕文件超过 8 MB，请选择较小的字幕文件。");
   validate_utf8(input);
-  if (input.starts_with("\xef\xbb\xbf"))
+  if (livekit::compat::starts_with(input, "\xef\xbb\xbf"))
     input.remove_prefix(3);
   std::istringstream stream{std::string(input)};
   std::vector<std::vector<std::string>> blocks;
@@ -108,11 +109,11 @@ Subtitles Subtitles::parse(std::string_view input) {
   for (size_t b = 0; b < blocks.size(); ++b) {
     const auto& lines = blocks[b];
     const auto& first = lines[0];
-    if (b == 0 &&
-        (first == "WEBVTT" || first.starts_with("WEBVTT ") || first.starts_with("WEBVTT\t")))
+    if (b == 0 && (first == "WEBVTT" || livekit::compat::starts_with(first, "WEBVTT ") ||
+                   livekit::compat::starts_with(first, "WEBVTT\t")))
       continue;
-    if (first == "NOTE" || first.starts_with("NOTE ") || first.starts_with("NOTE\t") ||
-        first == "STYLE" || first == "REGION")
+    if (first == "NOTE" || livekit::compat::starts_with(first, "NOTE ") ||
+        livekit::compat::starts_with(first, "NOTE\t") || first == "STYLE" || first == "REGION")
       continue;
     const size_t time_line = first.find("-->") != first.npos ? 0 : 1;
     if (time_line >= lines.size())

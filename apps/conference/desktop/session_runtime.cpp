@@ -1,3 +1,4 @@
+#include "livekit/compat/thread.hpp"
 #include "rtc_blocking_bridge.hpp"
 #include "data_event_mailbox.hpp"
 #include "rtc_event_mailbox.hpp"
@@ -112,7 +113,8 @@ void Session::start(SessionOptions options) {
     chat_epoch_ = std::to_string(random()) + "-" + std::to_string(random());
   }
   try {
-    worker_ = std::jthread([this, options = std::move(options)](std::stop_token stop) mutable {
+    worker_ = livekit::compat::jthread([this, options = std::move(options)](
+                                           livekit::compat::stop_token stop) mutable {
       std::string error;
       const auto redact = [&](std::string message) {
         const auto& token = options.connection.token;
@@ -131,7 +133,7 @@ void Session::start(SessionOptions options) {
             (void)engine->close();
           }
         } close{engine.get()};
-        std::stop_callback cancel_join(stop, [raw = &engine->raw()] { raw->leave(); });
+        livekit::compat::stop_callback cancel_join(stop, [raw = &engine->raw()] { raw->leave(); });
         livekit::sdk::app_support::RtcEventMailbox engine_events(*engine);
         // Only the supervisor owns engine control. Codec callbacks only replace an owned frame.
         options.connection.subscribe = false;
@@ -210,7 +212,7 @@ void Session::start(SessionOptions options) {
           track->ready = true;
         }
         const auto subscribe = [&](TrackDescriptor descriptor) -> sdk::Result<void> {
-          if (tracks.contains(descriptor.id))
+          if (tracks.count(descriptor.id))
             return sdk::Result<void>::success();
           auto track = std::make_shared<Track>();
           track->descriptor = descriptor;

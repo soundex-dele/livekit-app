@@ -1,6 +1,6 @@
 # AV 直播伴侣
 
-Windows 11 x64 原生直播工作台和浏览器观看端。桌面使用 C++20、Qt 6.8+ Widgets；媒体由 SDK Studio 引擎处理，业务服务管理账号、直播、聊天、连麦、礼物和 PK。直播输出使用自有 C++ SFU 的 VP8/Opus 链路。
+Windows 11 x64 原生直播工作台和浏览器观看端。桌面使用 C++17、Qt 6.8+ Widgets；媒体由 SDK Studio 引擎处理，业务服务管理账号、直播、聊天、连麦、礼物和 PK。直播输出使用自有 C++ SFU 的 VP8/Opus 链路。
 
 ## 构建
 

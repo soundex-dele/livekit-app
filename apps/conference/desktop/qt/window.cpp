@@ -1,3 +1,4 @@
+#include "livekit/compat/algorithm.hpp"
 #include "window.hpp"
 #include <QApplication>
 #include <QCheckBox>
@@ -924,7 +925,7 @@ void Window::updateVideos() {
   if (auto local = media_.participants.find(media_.local_sid); local != media_.participants.end()) {
     bool preview = false;
     for (auto& t : tiles)
-      if (t.id.starts_with("local-"))
+      if (livekit::compat::starts_with(t.id, "local-"))
         preview = true;
     if (!preview)
       tiles.insert(tiles.begin(),
@@ -979,7 +980,7 @@ void Window::updateVideos() {
     if (t.frame)
       frames[t.id] = t.frame;
     QImage image;
-    if (t.frame && images.contains(t.id))
+    if (t.frame && images.count(t.id))
       image = images.at(t.id);
     video->present(image, str(t.label), str(t.status), mode == 1);
     grid_->addWidget(video, i / 3, i % 3);
