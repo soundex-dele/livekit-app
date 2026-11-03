@@ -15,7 +15,9 @@ C++17 + Qt 6 Widgets 的自有会议产品，使用独立 RTC backend、逐轨 G
 
 不包含录制、转写、白板、虚拟背景、移动端或浏览器参会。实际设备权限及听感需人工验收。
 
-媒体主管线程持有一个 `RtcEngine`，各发布轨道独立连接输入、编码与发布节点，各订阅轨道独立连接订阅、解码、预览/共享音频输出。UI 只读取不可变快照并排队控制命令；可靠聊天通过同一 backend 的 `RoomServices`。独立构建禁用旧 Room SDK，不需要兼容层。
+媒体主管线程持有同步 `client::MediaEngine`，基于新 Room 接口管理逐轨 GraphEngine 采集、编解码和输出。UI 只读取快照并排队控制命令；可靠聊天通过 Room 数据通道。connect 返回 bool，有值操作返回 Result<T>，void 控制直接记录日志；保留 RoomObserver，没有操作完成回调。停止时 close 取消阻塞请求并关闭媒体图。重连使用 SFU 下发的 refresh_token；再次入会由业务 API 获取新凭据。
+
+SDK 构建需开启 LIVEKIT_BUILD_CLIENT、RTC_NATIVE、RTC_GRAPH_NODES、RTC_MEDIA 和 SERVER_SDK，会议目标只链接新 MediaEngine。
 
 ## 构建
 

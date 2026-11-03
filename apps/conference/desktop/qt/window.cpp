@@ -830,26 +830,7 @@ void Window::connectMedia() {
       spec.local_preview = true;
       o.media.push_back(spec);
     }
-    auto generation = api_.epoch();
-    o.connection.token_provider = [this, generation](demo::sdk::TokenRequest request,
-                                                     demo::sdk::TokenCompletion complete) {
-      QMetaObject::invokeMethod(
-          &api_,
-          [this, generation, request, complete = std::move(complete)] {
-            if (generation != api_.epoch() || request.stop.stop_requested()) {
-              complete({{}, demo::sdk::TokenFailure::denied});
-              return;
-            }
-            api_.request(path("credentials"), {}, [complete, request](QJsonValue v, QString e) {
-              if (request.stop.stop_requested() || !e.isEmpty())
-                complete({{}, demo::sdk::TokenFailure::denied});
-              else
-                complete({v.toObject().value("media_token").toString().toStdString(),
-                          demo::sdk::TokenFailure::none});
-            });
-          },
-          Qt::QueuedConnection);
-    };
+    // Room retains refreshed tokens received from SFU signaling for rejoin.
     try {
       session_.start(std::move(o));
     } catch (const std::exception& e) {

@@ -1,7 +1,6 @@
 #include "livekit/compat/thread.hpp"
-#include "livekit/rtc/livekit.hpp"
 #pragma once
-#include <livekit/rtc/types.hpp>
+#include <livekit/media_engine.hpp>
 #include <livekit/media.hpp>
 #include <livekit/json.hpp>
 #include <filesystem>
@@ -14,10 +13,10 @@
 
 namespace demo {
 namespace sdk = livekit::sdk;
-namespace rtc = sdk::rtc;
+namespace rtc = sdk::client;
 
 struct SessionOptions {
-  rtc::LiveKitRoomOptions connection;
+  rtc::ConnectionOptions connection;
   std::string room;
   std::vector<sdk::MediaSpec> media;
   bool audio_playout = false, microphone = false;

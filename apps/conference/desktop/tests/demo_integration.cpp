@@ -296,6 +296,10 @@ int main(int argc, char** argv) {
     check(viewer.snapshot().state == demo::State::Error &&
               viewer.snapshot().error.find("invalid-token") == std::string::npos,
           "Token error/redaction");
+    invalid.connection.token = "a";  // Also occurs inside the replacement text.
+    viewer.start(invalid);
+    until([&] { return viewer.snapshot().finished; }, "Short token redaction must terminate");
+    check(viewer.snapshot().state == demo::State::Error, "Short token rejected");
     view.media.clear();
     viewer.start(view);
     until([&] { return viewer.snapshot().state == demo::State::Connected; }, "Final connect");
