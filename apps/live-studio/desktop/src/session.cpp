@@ -1,6 +1,5 @@
 #include "livekit/compat/algorithm.hpp"
 #include "livekit/compat/thread.hpp"
-#include "livekit/rtc/livekit.hpp"
 #include "session.hpp"
 #include <av/http.hpp>
 #include "platform.hpp"
@@ -214,12 +213,11 @@ void Session::set_audio(sdk::StudioAudioSettings a) {
 void Session::connect(bool interaction) {
   Json args{{"stage", interaction}};
   auto credentials = request(prefix + "broadcasts/" + broadcast_ + "/connect", &args);
-  sdk::rtc::LiveKitRoomOptions options;
+  sdk::client::ConnectionOptions options;
   options.url = credentials.at("media_url");
   options.token = credentials.at("media_token");
   options.connect_timeout = 10;
   options.operation_timeout = std::chrono::seconds(10);
-  options.stats_interval = std::chrono::seconds(1);
   options.reconnect.enabled = false;
   options.max_tracks = 16;
   MediaSession::Statistics stats;
@@ -236,7 +234,7 @@ void Session::connect(bool interaction) {
           media.push_back(row);
         if (type == "outbound-rtp") {
           bytes += row.value("bytesSent", uint64_t(0));
-          frames += row.value("framesEncoded", uint64_t(0));
+          frames += row.value("framesSent", row.value("framesEncoded", uint64_t(0)));
         }
       }
       auto& lastBytes = (*previous)[0];

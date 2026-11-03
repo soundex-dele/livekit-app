@@ -28,6 +28,7 @@ config = root / 'server.yaml'
 config.write_text(f'port: {port}\nbind_addresses: [127.0.0.1]\nrtc:\n'
                   f'  tcp_port: {tcp}\n  udp_port: {udp}\n  use_external_ip: false\n'
                   '  node_ip: 127.0.0.1\n  enable_loopback_candidate: true\n'
+                  '  ips:\n    includes: [127.0.0.1/32]\n'
                   f'keys:\n  mediatest: {env["LIVEKIT_API_SECRET"]}\n'
                   'room:\n  enable_remote_unmute: true\nlogging:\n  level: warn\n')
 flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0

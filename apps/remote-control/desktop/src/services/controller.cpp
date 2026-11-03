@@ -321,12 +321,6 @@ void Controller::media(std::string url, sdk::Json grant, std::string credential)
       }
       auto next = sdk::ControlClock::now(), move_at = next, layout_deadline = next + 10s;
 
-      struct Send {
-        std::future<sdk::Result<void>> future;
-        sdk::ControlClock::time_point deadline;
-      };
-
-      std::optional<Send> sending;
       while (!stop_) {
         auto polled = connection->poll();
         if (!polled) {
@@ -343,17 +337,6 @@ void Controller::media(std::string url, sdk::Json grant, std::string credential)
         }
         const auto now = sdk::ControlClock::now();
         std::optional<sdk::Json> packet;
-        if (sending) {
-          if (sending->future.wait_for(0ms) == std::future_status::ready) {
-            auto sent = sending->future.get();
-            if (!sent) {
-              return sent;
-            }
-            sending.reset();
-          } else if (now >= sending->deadline)
-            return sdk::Result<void>::failure(sdk::make_failure(
-                sdk::ErrorDomain::data, sdk::ErrorCode::timeout, "控制通道发送超时"));
-        }
         {
           std::lock_guard lock(mutex_);
           protocol_.tick(now);
@@ -365,7 +348,7 @@ void Controller::media(std::string url, sdk::Json grant, std::string credential)
             protocol_.flush_move();
             move_at = now + 34ms;
           }
-          if (!sending && !protocol_.queue.empty())
+          if (!protocol_.queue.empty())
             packet = protocol_.next();
           if (protocol_.layout.is_null() && now >= layout_deadline)
             return sdk::Result<void>::failure(sdk::make_failure(
@@ -373,7 +356,10 @@ void Controller::media(std::string url, sdk::Json grant, std::string credential)
         }
         if (packet) {
           auto raw = packet->dump();
-          sending = Send{connection->send({raw.begin(), raw.end()}), now + 2s};
+          auto sent = connection->send({raw.begin(), raw.end()});
+          if (!sent) {
+            return sent;
+          }
         }
         if (auto frame = connection->take_frame()) {
           auto image = convert_frame(*frame);
@@ -394,8 +380,7 @@ void Controller::media(std::string url, sdk::Json grant, std::string credential)
           event = protocol_.next();
         }
         auto raw = event.dump();
-        auto sent = connection->send({raw.begin(), raw.end()});
-        sent.wait_for(200ms);
+        (void)connection->send({raw.begin(), raw.end()});
       }
       return sdk::Result<void>::success();
     };
@@ -408,10 +393,7 @@ void Controller::media(std::string url, sdk::Json grant, std::string credential)
       fail(e.what());
   }
   if (connection) {
-    auto closed = connection->close();
-    if (!closed && !stop_) {
-      fail(closed.failure_record()->message);
-    }
+    connection->close();
   }
   stop_ = true;
 }

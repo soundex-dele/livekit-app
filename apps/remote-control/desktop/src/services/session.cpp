@@ -217,7 +217,6 @@ void Session::media(std::string url, std::string id, std::string credential) {
           return authorized;
         }
       }
-      std::deque<std::future<sdk::Result<void>>> sends;
       auto next = sdk::ControlClock::now();
       while (!stop_) {
         auto polled = connection_media->poll();
@@ -250,18 +249,6 @@ void Session::media(std::string url, std::string id, std::string credential) {
           return sdk::Result<void>::failure(sdk::make_failure(
               sdk::ErrorDomain::lifecycle, sdk::ErrorCode::request_failed, control_->reason()));
         }
-        while (!sends.empty() && sends.front().wait_for(0ms) == std::future_status::ready) {
-          auto sent = sends.front().get();
-          if (!sent) {
-            return sent;
-          }
-          sends.pop_front();
-          trace("status_sent");
-        }
-        if (sends.size() >= 8)
-          return sdk::Result<void>::failure(sdk::make_failure(sdk::ErrorDomain::lifecycle,
-                                                              sdk::ErrorCode::request_failed,
-                                                              "Control status send queue stalled"));
         if (sdk::ControlClock::now() >= next) {
           if (!fixture_) {
             if (!sdk::control_permissions().ready())
@@ -284,13 +271,18 @@ void Session::media(std::string url, std::string id, std::string credential) {
             }
           }
           auto raw = control_->status().dump();
-          sends.push_back(connection_media->send({raw.begin(), raw.end()}));
+          auto sent = connection_media->send({raw.begin(), raw.end()});
+          if (!sent) {
+            return sent;
+          }
+          trace("status_sent");
           next = sdk::ControlClock::now() + 500ms;
         }
         std::this_thread::sleep_for(10ms);
       }
       control_->stop("media_ended");
-      return connection_media->close();
+      connection_media->close();
+      return sdk::Result<void>::success();
     };
     const auto outcome = run_media();
     if (!outcome) {
@@ -315,13 +307,7 @@ void Session::media(std::string url, std::string id, std::string credential) {
   // Release held input before any potentially blocking graph/transport teardown.
   control_->stop("media_ended");
   if (connection_media) {
-    auto closed = connection_media->close();
-    if (!closed) {
-      std::lock_guard lock(mutex_);
-      if (snapshot_.error.empty()) {
-        snapshot_.error = closed.failure_record()->message;
-      }
-    }
+    connection_media->close();
   }
 }
 }  // namespace remote_app

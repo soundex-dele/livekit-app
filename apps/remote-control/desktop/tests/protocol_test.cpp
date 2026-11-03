@@ -112,7 +112,9 @@ int main() {
       p.push({{"type", "key"}});
     rejected([&] { p.push({{"type", "key"}}); }, "bounded queue");
     auto r = std::make_shared<MacRecorder>();
-    auto input = sdk::detail::mac_input_with_api(r);
+    auto created = sdk::detail::mac_input_with_api(r);
+    check(bool(created), "create synthetic mac input");
+    auto input = *created;
     sdk::ControlInput e;
     e.type = "key";
     e.code = "ControlRight";

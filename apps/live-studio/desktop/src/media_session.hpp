@@ -1,7 +1,6 @@
 #include "livekit/compat/thread.hpp"
-#include "livekit/rtc/livekit.hpp"
 #pragma once
-#include <livekit/rtc/engine.hpp>
+#include <livekit/media_engine.hpp>
 #include <livekit/studio.hpp>
 #include <atomic>
 #include <functional>
@@ -14,8 +13,8 @@ namespace studio_app {
 // threads only read snapshots or request stop; codec callbacks use mailboxes.
 class MediaSession {
  public:
-  using Statistics = std::function<void(const livekit::sdk::rtc::TransportStatistics&)>;
-  MediaSession(livekit::sdk::rtc::LiveKitRoomOptions, std::shared_ptr<livekit::sdk::Studio>,
+  using Statistics = std::function<void(const livekit::sdk::client::PeerStatistics&)>;
+  MediaSession(livekit::sdk::client::ConnectionOptions, std::shared_ptr<livekit::sdk::Studio>,
                bool interaction, const std::atomic<bool>& closing, Statistics = {});
   ~MediaSession();
 
@@ -42,7 +41,7 @@ class MediaSession {
   }
 
  private:
-  void run(livekit::sdk::rtc::LiveKitRoomOptions, std::shared_ptr<livekit::sdk::Studio>, bool,
+  void run(livekit::sdk::client::ConnectionOptions, std::shared_ptr<livekit::sdk::Studio>, bool,
            const std::atomic<bool>&, Statistics, std::promise<livekit::sdk::Result<void>>);
   std::atomic<bool> stop_{false}, connected_{false}, finished_{false};
   std::atomic<uint64_t> received_video_{0}, received_audio_{0};

@@ -1,20 +1,16 @@
-#include "rtc_blocking_bridge.hpp"
 #pragma once
-#include "rtc_event_mailbox.hpp"
-#include "data_event_mailbox.hpp"
-#include <livekit/rtc/engine.hpp>
+#include <livekit/media_engine.hpp>
 #include <livekit/remote_control.hpp>
 #include <atomic>
-#include <set>
 #include <mutex>
-#include <thread>
+#include <map>
 
 namespace remote_app {
 namespace sdk = livekit::sdk;
-namespace rtc = sdk::rtc;
+namespace rtc = sdk::client;
 
-// Owned only by the media supervisor. A new connection never restores a grant.
-class RtcConnection {
+// Owned by the media supervisor. Reconnection never restores a control grant.
+class RtcConnection : private rtc::RoomObserver {
  public:
   RtcConnection(std::string url, std::string token, std::string peer, bool receive_video,
                 const std::atomic<bool>& stop);
@@ -29,24 +25,25 @@ class RtcConnection {
   };
 
   sdk::Result<std::vector<Packet>> take_data();
-  std::future<sdk::Result<void>> send(std::vector<uint8_t>);
+  // Success denotes local submission; protocol acknowledgement/watchdog confirms delivery.
+  sdk::Result<void> send(std::vector<uint8_t>);
   std::shared_ptr<const sdk::VideoFrame> take_frame();
   bool connected() const;
-  sdk::Result<void> close();
+  void close();
 
  private:
+  void on_room_event(const rtc::RoomEvent&) override;
   bool owned(const std::string& sid) const;
-  sdk::Result<void> subscribe(const rtc::TrackDescriptor&);
-  std::unique_ptr<livekit::sdk::app_support::BlockingRtc> engine_;
-  sdk::app_support::RtcEventMailbox engine_events_;
-  std::unique_ptr<sdk::app_support::DataEventMailbox> data_events_;
+  std::unique_ptr<rtc::MediaEngine> engine_;
   sdk::Failure failure_;
   std::string peer_, peer_sid_;
   const std::atomic<bool>& stop_;
   bool receive_video_, closed_ = false;
-  std::map<rtc::TrackId, rtc::TrackDescriptor> discovered_;
-  std::set<rtc::TrackId> subscriptions_;
-  std::mutex frames_mutex_;
-  std::map<rtc::TrackId, std::shared_ptr<const sdk::VideoFrame>> frames_;
+  std::shared_ptr<rtc::MediaTrack> screen_;
+  std::map<rtc::TrackSid, std::shared_ptr<rtc::MediaTrack>> subscriptions_;
+  mutable std::mutex mutex_;
+  sdk::Failure event_failure_;
+  std::vector<Packet> packets_;
+  std::map<rtc::TrackSid, std::shared_ptr<const sdk::VideoFrame>> frames_;
 };
 }  // namespace remote_app

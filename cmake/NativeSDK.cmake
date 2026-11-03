@@ -2,7 +2,7 @@ include_guard(GLOBAL)
 get_filename_component(_sdk_default "${CMAKE_CURRENT_LIST_DIR}/../../livekit-sdk-cpp" ABSOLUTE)
 set(AV_SDK_SOURCE_DIR "${_sdk_default}" CACHE PATH "Native SDK checkout")
 
-# Standalone products also use the non-installed blocking/mailbox adapters.
+# Standalone products also use non-installed media/server helpers.
 include_directories("${AV_SDK_SOURCE_DIR}/support")
 
 # Called once by the product orchestrator, or by a standalone desktop project.
@@ -23,6 +23,7 @@ macro(av_add_native_sdk rtc player)
     set(CMAKE_OBJCXX_STANDARD 17)
     set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
   endif()
+  set(LIVEKIT_BUILD_CLIENT ${rtc} CACHE BOOL "" FORCE)
   set(LIVEKIT_BUILD_RTC_NATIVE ${rtc} CACHE BOOL "" FORCE)
   set(LIVEKIT_BUILD_RTC_GRAPH_NODES ${rtc} CACHE BOOL "" FORCE)
   set(LIVEKIT_BUILD_RTC_MEDIA ${rtc} CACHE BOOL "" FORCE)
