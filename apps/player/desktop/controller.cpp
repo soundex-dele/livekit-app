@@ -224,16 +224,16 @@ void Controller::update() {
   try {
     if (operation_ == Operation::open && completion_ready_) {
       completion_ready_ = false;
-      const auto opened = opening_.get();
-      if (!opened) {
+      const auto openingResult = opening_.get();
+      if (!openingResult) {
         operation_ = Operation::none;
         if (!nextOpen_) {
-          reportFailure(QString::fromStdString(opened.error().message));
+          reportFailure(QString::fromStdString(openingResult.error().message));
         }
         emit changed();
         return;
       }
-      const auto& media = *opened;
+      const auto& media = *openingResult;
       {
         std::lock_guard lock(output_->mutex);
         output_->requested = false;

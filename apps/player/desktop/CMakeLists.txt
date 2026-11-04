@@ -9,7 +9,11 @@ if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
 endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Multimedia Svg)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Multimedia)
+# Icons are painted in code; QtSvg is only needed if a build wants to use the
+# bundled SVG artwork via the image-formats plugin. Keep it optional so the app
+# builds against Qt packages that ship only Widgets/Multimedia.
+find_package(Qt6 6.8 QUIET COMPONENTS Svg)
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/NativeSDK.cmake")
 if(NOT TARGET LiveKit::Player)
   av_add_native_sdk(OFF ON)
@@ -20,7 +24,10 @@ add_library(livekit_player_app STATIC
   audio_output.cpp controller.cpp playlist.cpp settings.cpp video_widget.cpp window.cpp
   subtitles.cpp resources.qrc)
 target_include_directories(livekit_player_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(livekit_player_app PUBLIC LiveKit::Player Qt6::Widgets Qt6::Multimedia Qt6::Svg)
+target_link_libraries(livekit_player_app PUBLIC LiveKit::Player Qt6::Widgets Qt6::Multimedia)
+if(TARGET Qt6::Svg)
+  target_link_libraries(livekit_player_app PUBLIC Qt6::Svg)
+endif()
 target_compile_features(livekit_player_app PUBLIC cxx_std_17)
 qt_add_executable(livekit_local_player WIN32 MACOSX_BUNDLE main.cpp)
 target_link_libraries(livekit_local_player PRIVATE livekit_player_app utoolkit_logging)
@@ -59,7 +66,10 @@ endif()
 if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   add_executable(livekit_player_subtitle_tests tests/subtitle_tests.cpp subtitles.cpp)
-  target_include_directories(livekit_player_subtitle_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  # subtitles.cpp uses the SDK's C++17 compatibility helpers; this target is
+  # header-only and deliberately does not link the media graph.
+  target_include_directories(livekit_player_subtitle_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${AV_SDK_SOURCE_DIR}/include")
   target_compile_features(livekit_player_subtitle_tests PRIVATE cxx_std_17)
   if(MSVC)
     target_compile_options(livekit_player_subtitle_tests PRIVATE /utf-8)

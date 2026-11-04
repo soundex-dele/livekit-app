@@ -3,6 +3,7 @@
 #include <QMimeData>
 #include <QUrl>
 #include <QColor>
+#include <QFont>
 
 namespace player_demo {
 QVariant PlaylistModel::data(const QModelIndex& index, int role) const {
@@ -10,14 +11,25 @@ QVariant PlaylistModel::data(const QModelIndex& index, int role) const {
     return {};
   const auto& entry = items_[index.row()];
   if (role == Qt::DisplayRole)
-    return QString(entry.id == currentId_ ? "正在播放 · " : "     ") +
-           QFileInfo(entry.path).fileName();
+    return QStringLiteral("%1   %2%3")
+        .arg(index.row() + 1, 2, 10, QChar('0'))
+        .arg(entry.id == currentId_ ? QStringLiteral("▶  ") : QStringLiteral("   "))
+        .arg(QFileInfo(entry.path).fileName());
   if (role == Qt::ToolTipRole)
     return entry.path + (entry.error.isEmpty() ? "" : "\n" + entry.error);
   if (role == Qt::AccessibleTextRole)
     return QFileInfo(entry.path).fileName() + (entry.error.isEmpty() ? "" : "，无法播放");
-  if (role == Qt::ForegroundRole && !entry.error.isEmpty())
-    return QColor("#ff9292");
+  if (role == Qt::FontRole && entry.id == currentId_) {
+    QFont font;
+    font.setBold(true);
+    return font;
+  }
+  if (role == Qt::ForegroundRole) {
+    if (!entry.error.isEmpty())
+      return QColor("#ff9292");
+    if (entry.id == currentId_)
+      return QColor("#7fb8ff");
+  }
   if (role == Qt::UserRole)
     return entry.path;
   return {};

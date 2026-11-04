@@ -13,7 +13,10 @@
 #include <QUrl>
 #include <QDropEvent>
 #include <QDragEnterEvent>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QDir>
+#include <algorithm>
 
 using namespace player_demo;
 
@@ -413,6 +416,10 @@ class PlayerTests : public QObject {
     QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/compact" + suffix + ".png"));
     action(window, "playlist")->trigger();
     QVERIFY(window.findChild<QWidget*>("listPanel")->isHidden());
+    QTest::qWait(30);
+    auto* area = window.findChild<QWidget*>("videoArea");
+    QVERIFY(area);
+    QVERIFY(area->width() >= area->parentWidget()->width() - 2);
     QVERIFY(window.saveScreenshot(QString(PLAYER_SCREENSHOTS) + "/no-list" + suffix + ".png"));
     window.toggleFullscreen();
     QVERIFY(window.isFullScreen());
@@ -422,6 +429,65 @@ class PlayerTests : public QObject {
     QTest::keyClick(&window, Qt::Key_Escape);
     QVERIFY(!window.isFullScreen());
     QVERIFY(!controls->isHidden());
+    window.close();
+    QTRY_VERIFY(window.controller().finished());
+  }
+
+  void potplayerChrome() {
+    QTemporaryDir directory;
+    PlayerWindow window(directory.filePath("state.ini"), true, std::make_unique<FakeOutput>());
+    window.show();
+    QTest::qWait(30);
+    auto* area = window.findChild<QWidget*>("videoArea");
+    auto* controls = window.findChild<QWidget*>("controls");
+    auto* topBar = window.findChild<QWidget*>("topBar");
+    auto* video = window.findChild<VideoWidget*>("video");
+    auto* status = window.findChild<QLabel*>("status");
+    auto* volume = window.findChild<QSlider*>("volume");
+    auto* progress = window.findChild<QSlider*>("progress");
+    QVERIFY(area && controls && topBar && video && status && volume && progress);
+    QCOMPARE(controls->parentWidget(), area);
+    QCOMPARE(video->parentWidget(), area);
+    QVERIFY(controls->y() > area->height() / 2);
+    QVERIFY(controls->y() + controls->height() <= area->height() + 1);
+    QVERIFY(video->height() >= controls->height());
+    QVERIFY(topBar->isHidden());
+
+    window.openFiles({fixture("av.mp4")});
+    QTRY_VERIFY_WITH_TIMEOUT(!window.controller().image().isNull(), 5000);
+    QVERIFY(status->text().contains(QStringLiteral("×")));
+
+    auto* cycle = action(window, "cycleRepeat");
+    QVERIFY(cycle);
+    cycle->trigger();
+    QVERIFY(action(window, "repeat1")->isChecked());
+    cycle->trigger();
+    QVERIFY(action(window, "repeat2")->isChecked());
+    cycle->trigger();
+    QVERIFY(action(window, "repeat0")->isChecked());
+
+    const int before = volume->value();
+    QWheelEvent wheel(QPointF(10, 10), QPointF(10, 10), QPoint(), QPoint(0, 120), Qt::NoButton,
+                      Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(video, &wheel);
+    QCOMPARE(volume->value(), std::min(100, before + 5));
+
+    QVERIFY(progress->isEnabled());
+    const QPointF click(progress->width() / 2.0, progress->height() / 2.0);
+    QMouseEvent press(QEvent::MouseButtonPress, click, Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QApplication::sendEvent(progress, &press);
+    QMouseEvent release(QEvent::MouseButtonRelease, click, Qt::LeftButton, Qt::NoButton,
+                        Qt::NoModifier);
+    QApplication::sendEvent(progress, &release);
+    QVERIFY(progress->value() > 4000 && progress->value() < 6000);
+
+    window.toggleFullscreen();
+    QVERIFY(window.isFullScreen());
+    QVERIFY(!topBar->isHidden());
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QVERIFY(!window.isFullScreen());
+    QVERIFY(topBar->isHidden());
     window.close();
     QTRY_VERIFY(window.controller().finished());
   }
