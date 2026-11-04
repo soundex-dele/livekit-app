@@ -1,18 +1,109 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AV · 远程协助</title></head>
-<body><main>
-<header><span class="brand">AV / 远程协助</span><span id="badge">未连接</span></header>
-<section class="intro"><p class="eyebrow">连接需要对方确认</p><h1>远程协助，就在浏览器里。</h1><p>输入 Windows 端显示的连接码，申请查看主屏并操作键盘和鼠标。</p></section>
-<form id="connect-form"><label>连接码<input id="code" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="10 位临时连接码" required autocomplete="off"></label><label>你的称呼<input id="name" maxlength="40" placeholder="让对方认出你" required></label><button id="connect" type="submit">申请连接 →</button></form>
-<section class="toolbar"><p id="status" role="status">连接码有效期为 5 分钟。对方同意前，不会共享画面。</p><button id="stop" class="danger" disabled>停止连接</button></section>
-<section id="viewport" tabindex="0" aria-label="远程桌面"><video id="screen" autoplay playsinline muted></video><div id="placeholder">等待远程画面</div></section>
-<form id="text-form" class="text-composer" aria-labelledby="text-heading">
-  <div class="text-field"><h2 id="text-heading">发送文字</h2>
-    <label for="remote-text">在本机输入中文，再发送到远端当前输入框</label>
-    <textarea id="remote-text" rows="3" maxlength="1024" autocomplete="off" spellcheck="false" aria-describedby="text-help text-status" placeholder="支持中文、英文、换行和表情，每次最多 256 个字符" disabled></textarea>
-    <p id="text-help">先点击远程画面中的目标输入框。发送文字不使用剪贴板，也不会自动重发。</p>
-    <p id="text-status" role="status" aria-live="polite">连接后可用。</p>
-  </div><button id="send-text" type="submit" disabled>发送文字</button>
-</form>
-<footer><span id="input-status">连接成功后，点击画面启用键鼠操作；离开画面后暂停输入。</span><span>主屏 · 键鼠与文字 · 不共享文件与剪贴板</span></footer>
-</main><script type="module" src="/src/app/main.ts"></script></body></html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#1d4ed8"><title>AV 远程协助 · 控制中心</title></head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-logo">AV</span>
+      <span class="brand-text"><strong>AV 远程协助</strong><small>安全连接 · 需对方确认</small></span>
+    </div>
+    <p class="nav-caption">工作台</p>
+    <nav class="nav" aria-label="主导航">
+      <a class="nav-item active" href="#connect-panel" data-nav><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M9 21h6M12 17v4"/></svg><span>远程控制</span></a>
+      <a class="nav-item" href="#session-panel" data-nav><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="14" rx="2"/><path d="M2.5 9h19M7 21h10"/></svg><span>远程桌面</span></a>
+      <a class="nav-item" href="#help-panel" data-nav><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.7 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.1.9-1.1 1.8M12 17h.01"/></svg><span>使用说明</span></a>
+    </nav>
+    <div class="sidebar-foot">
+      <span class="secure-badge"><span class="secure-dot"></span>本地授权</span>
+      <p>每次连接都由被控端手动确认。连接码 5 分钟有效，且仅供一次申请。</p>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div class="topbar-title">远程控制<span> / 发起协助</span></div>
+      <div class="topbar-actions">
+        <span class="service"><span class="service-dot"></span>局域网服务</span>
+        <span class="divider" aria-hidden="true"></span>
+        <span id="badge" class="badge" data-state="idle">未连接</span>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="hero">
+        <div class="hero-text">
+          <p class="eyebrow">REMOTE ASSISTANCE</p>
+          <h1>远程协助，随时开始</h1>
+          <p class="hero-sub">输入被控端显示的连接码发起协助。对方同意后，才能查看主屏并操作键鼠。</p>
+        </div>
+        <div class="hero-facts" aria-label="连接规则">
+          <div><strong>10 位</strong><span>临时连接码</span></div>
+          <div><strong>5 分钟</strong><span>有效时间</span></div>
+          <div><strong>1 次</strong><span>单次申请</span></div>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section class="panel connect-panel" id="connect-panel">
+          <div class="panel-head">
+            <span class="panel-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4M7.5 10.5l3 3 6-6"/></svg></span>
+            <div><h2>连接远程设备</h2><p>填写对方提供的 10 位连接码与你的称呼</p></div>
+          </div>
+          <form id="connect-form">
+            <label>对方连接码<input id="code" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="10 位临时连接码" required autocomplete="off"></label>
+            <label>你的称呼<input id="name" maxlength="40" placeholder="让对方认出你" required></label>
+            <button id="connect" type="submit">申请连接 <span aria-hidden="true">→</span></button>
+          </form>
+          <div class="chips"><span>主屏共享</span><span>键鼠操作</span><span>文字输入</span></div>
+        </section>
+
+        <section class="panel local-panel">
+          <div class="local-card">
+            <div class="local-top"><span>当前设备</span><span class="role-pill">控制端</span></div>
+            <div class="local-body">
+              <p class="local-label">本机标识</p>
+              <p class="local-value">浏览器控制端</p>
+              <p class="local-note">本机不生成常驻设备代码。请向被控端索取其生成的一次性连接码。</p>
+            </div>
+            <div class="local-foot"><span>连接需对方确认</span><span>不共享文件与剪贴板</span></div>
+          </div>
+          <div class="steps">
+            <h3>连接流程</h3>
+            <ol>
+              <li><b>01</b><span>被控端生成连接码并提供给你</span></li>
+              <li><b>02</b><span>填写连接码与称呼，提交申请</span></li>
+              <li><b>03</b><span>对方本地批准后开始共享画面</span></li>
+            </ol>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel session-panel" id="session-panel">
+        <div class="panel-head session-head">
+          <span class="panel-icon dark"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="14" rx="2"/><path d="M2.5 9h19M6 21h12M12 18v3"/></svg></span>
+          <div><h2>远程桌面</h2><p>连接成功后点击画面启用键鼠；离开画面会自动暂停输入</p></div>
+          <button id="stop" class="danger" disabled>停止连接</button>
+        </div>
+        <div class="toolbar"><p id="status" role="status">连接码有效期为 5 分钟。对方同意前，不会共享画面。</p><span class="toolbar-hint">点击画面启用键鼠</span></div>
+        <div id="viewport" tabindex="0" aria-label="远程桌面"><video id="screen" autoplay playsinline muted></video><div id="placeholder"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="14" rx="2"/><path d="M2.5 9h19M8 21h8M12 17v4"/></svg><span>等待远程画面</span><small>对方批准后，这里会显示主屏</small></div></div>
+        <form id="text-form" class="text-composer" aria-labelledby="text-heading">
+          <div class="text-field"><h2 id="text-heading">发送文字</h2>
+            <label for="remote-text">在本机输入中文，再发送到远端当前输入框</label>
+            <textarea id="remote-text" rows="3" maxlength="1024" autocomplete="off" spellcheck="false" aria-describedby="text-help text-status" placeholder="支持中文、英文、换行和表情，每次最多 256 个字符" disabled></textarea>
+            <p id="text-help">先点击远程画面中的目标输入框。发送文字不使用剪贴板，也不会自动重发。</p>
+            <p id="text-status" role="status" aria-live="polite">连接后可用。</p>
+          </div><button id="send-text" type="submit" disabled>发送文字</button>
+        </form>
+        <footer><span id="input-status">连接成功后，点击画面启用键鼠操作；离开画面后暂停输入。</span><span>主屏 · 键鼠与文字 · 不共享文件与剪贴板</span></footer>
+      </section>
+
+      <section class="help" id="help-panel">
+        <div class="help-card"><span class="help-num">01</span><h3>先获取连接码</h3><p>被控端在桌面客户端生成 10 位连接码，复制后交给你。连接码不持久保存。</p></div>
+        <div class="help-card"><span class="help-num">02</span><h3>对方本地确认</h3><p>申请提交后由被控端手动批准，批准前不会共享任何画面，也不允许输入。</p></div>
+        <div class="help-card"><span class="help-num">03</span><h3>随时可以停止</h3><p>任意一端停止、断线或关闭窗口都会结束会话，断线后需重新申请。</p></div>
+      </section>
+    </main>
+  </div>
+</div>
+<script type="module" src="/src/app/main.ts"></script>
+</body></html>

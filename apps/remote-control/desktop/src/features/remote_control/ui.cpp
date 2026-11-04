@@ -5,15 +5,19 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QFormLayout>
+#include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QMenu>
 #include <QPainter>
 #include <QRegularExpressionValidator>
 #include <QSettings>
+#include <QSize>
 #include <QStackedWidget>
 #include <QStyle>
 #include <QToolBar>
 #include <QUrl>
+#include <QVBoxLayout>
 
 namespace remote_app {
 namespace {
@@ -87,23 +91,94 @@ QIcon app_icon(bool active = false) {
   p.drawLine(32, 42, 32, 50);
   return QIcon(pix);
 }
+
+// Simple monochrome line icons for the left navigation. Keeping them white
+// means the same icon works for both the idle and selected navigation states.
+QIcon nav_icon(char kind) {
+  QPixmap pix(32, 32);
+  pix.fill(Qt::transparent);
+  QPainter p(&pix);
+  p.setRenderHint(QPainter::Antialiasing);
+  p.setPen(QPen(QColor("#ffffff"), 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  p.setBrush(Qt::NoBrush);
+  if (kind == 'm') {
+    p.drawRoundedRect(4, 6, 24, 16, 2, 2);
+    p.drawLine(11, 27, 21, 27);
+    p.drawLine(16, 22, 16, 27);
+    p.drawLine(9, 14, 12, 17);
+    p.drawLine(12, 17, 20, 10);
+  } else if (kind == 's') {
+    for (int y : {10, 16, 22}) {
+      p.drawLine(5, y, 27, y);
+    }
+    p.setBrush(QColor("#ffffff"));
+    p.drawEllipse(QPoint(11, 10), 3, 3);
+    p.drawEllipse(QPoint(21, 16), 3, 3);
+    p.drawEllipse(QPoint(14, 22), 3, 3);
+  } else {
+    p.drawEllipse(QPoint(16, 16), 11, 11);
+    p.drawLine(16, 14, 16, 21);
+    p.drawLine(16, 10, 16, 10);
+  }
+  return QIcon(pix);
+}
 }  // namespace
 
 void apply_theme() {
   qApp->setStyle("Fusion");
   qApp->setWindowIcon(app_icon());
   qApp->setStyleSheet(R"(
- QWidget{font-size:14px;color:#172033;} QMainWindow{background:#f3f6fb;}
- QLabel{background:transparent;} QLabel#title{font-size:27px;font-weight:650;} QLabel#cardTitle{font-size:19px;font-weight:600;} QLabel#muted{color:#526174;}
- QFrame#card{background:white;border:1px solid #dce3ef;border-radius:12px;}
- QPushButton{background:white;border:1px solid #b9c5d6;border-radius:7px;padding:7px 16px;}
- QPushButton:hover{background:#eef4ff;border-color:#2563eb;} QPushButton:pressed{background:#dbeafe;} QPushButton:checked{background:#dbeafe;border-color:#2563eb;color:#1d4ed8;font-weight:600;}
- QPushButton[primary="true"]{background:#2563eb;border-color:#2563eb;color:white;font-weight:600;} QPushButton[primary="true"]:hover{background:#1d4ed8;}
- QPushButton:disabled{background:#edf1f7;color:#68778b;border-color:#d3dce8;} QPushButton:focus,QLineEdit:focus,QTextEdit:focus{border:2px solid #2563eb;}
- QLineEdit,QTextEdit{background:white;border:1px solid #aab8cc;border-radius:6px;padding:9px;selection-background-color:#2563eb;}
- QLineEdit:read-only{background:#f3f6fb;} QLineEdit#localCode{font-size:29px;font-weight:600;letter-spacing:2px;}
- QToolBar{background:white;border-bottom:1px solid #dce3ef;spacing:10px;padding:6px;}
- QToolButton{padding:6px;} QToolButton:hover{background:#e8f0ff;} QScrollArea{border:0;} QStatusBar{background:white;}
+ QWidget{font-size:14px;color:#1b2740;background:#f4f7fc;}
+ QMainWindow{background:#f4f7fc;}
+ QFrame#sidebar{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #0c2050,stop:0.55 #17409c,stop:1 #2f6bff);}
+ QFrame#viewer{background:#0d1526;}
+ QLabel{background:transparent;}
+ QLabel#title{font-size:26px;font-weight:700;color:#16223a;}
+ QLabel#subtitle{color:#6b7a94;}
+ QLabel#cardTitle{font-size:17px;font-weight:700;color:#16223a;}
+ QLabel#muted{color:#6b7a94;}
+ QLabel#permissions,QLabel#textStatus{color:#4d5f7b;}
+ QLabel#brandText{color:#ffffff;font-size:18px;font-weight:700;}
+ QLabel#brandSub{color:#b9cff5;font-size:11px;}
+ QLabel#sideCaption{color:#a8c4f5;font-size:11px;}
+ QLabel#sideNote{color:#c7dbff;font-size:12px;}
+ QLabel#topTitle{font-size:15px;font-weight:700;color:#16223a;}
+ QLabel#connectionStatus{background:#eef3ff;border:1px solid #d8e4ff;border-radius:14px;color:#1d4ed8;padding:6px 14px;font-size:12px;font-weight:600;}
+ QFrame#card{background:#ffffff;border:1px solid #e3eaf5;border-radius:14px;}
+ QFrame#localCard{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1d4ed8,stop:0.6 #2f6bff,stop:1 #5b93ff);border:0;border-radius:14px;}
+ QFrame#localCard QLabel{color:#eaf2ff;}
+ QFrame#localCard QLabel#cardTitle{color:#ffffff;}
+ QFrame#localCard QLabel#localCodeLabel{color:#dbe8ff;font-size:12px;}
+ QFrame#localCard QLabel#localHint{color:#c7dbff;font-size:12px;}
+ QFrame#topbar{background:#ffffff;border-bottom:1px solid #e3eaf5;}
+ QFrame#composer{background:#ffffff;border-top:1px solid #e3eaf5;}
+ QLineEdit,QTextEdit{background:#f8fafd;border:1px solid #d9e2f0;border-radius:9px;padding:10px 12px;selection-background-color:#2f6bff;}
+ QLineEdit:focus,QTextEdit:focus{border:2px solid #2f6bff;}
+ QLineEdit:read-only{background:#f1f4fa;}
+ QLineEdit#localCode{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.35);color:#ffffff;font-size:28px;font-weight:700;letter-spacing:3px;padding:10px 14px;border-radius:9px;}
+ QLineEdit#localCode:read-only{background:rgba(255,255,255,0.12);}
+ QPushButton{background:#ffffff;border:1px solid #d3ddec;border-radius:9px;padding:9px 16px;color:#334a6d;}
+ QPushButton:hover{background:#eef4ff;border-color:#2f6bff;}
+ QPushButton:pressed{background:#dbe8ff;}
+ QPushButton:checked{background:#dbe8ff;border-color:#2f6bff;color:#1d4ed8;font-weight:700;}
+ QPushButton[primary="true"]{background:#2f6bff;border:1px solid #2f6bff;color:#ffffff;font-weight:700;}
+ QPushButton[primary="true"]:hover{background:#1d4ed8;border-color:#1d4ed8;}
+ QPushButton:disabled{background:#edf1f7;color:#8a9ab2;border-color:#dce4ef;}
+ QPushButton[nav="true"]{background:transparent;border:0;border-left:3px solid transparent;border-radius:8px;color:#d9e6ff;text-align:left;padding:10px 12px;font-size:14px;font-weight:500;}
+ QPushButton[nav="true"]:hover{background:rgba(255,255,255,0.12);}
+ QPushButton[nav="true"]:checked{background:rgba(255,255,255,0.20);border-left:3px solid #ffffff;color:#ffffff;font-weight:700;}
+ QPushButton#stopSession{color:#c02b3e;background:#fff0f1;border:1px solid #f6ccd2;}
+ QFrame#localCard QPushButton{background:rgba(255,255,255,0.16);border:1px solid rgba(255,255,255,0.42);color:#ffffff;}
+ QFrame#localCard QPushButton:hover{background:rgba(255,255,255,0.28);}
+ QFrame#localCard QPushButton[primary="true"]{background:#ffffff;border:1px solid #ffffff;color:#1d4ed8;}
+ QFrame#localCard QPushButton[primary="true"]:hover{background:#eaf1ff;}
+ QFrame#localCard QPushButton:disabled{background:rgba(255,255,255,0.10);color:rgba(255,255,255,0.55);border-color:rgba(255,255,255,0.2);}
+ QToolBar{background:#101c33;border:0;spacing:6px;padding:8px 12px;}
+ QToolBar QToolButton{color:#e8efff;background:transparent;border-radius:7px;padding:8px 12px;}
+ QToolBar QToolButton:hover{background:#2f6bff;color:#ffffff;}
+ QToolBar::separator{background:#2a3b59;width:1px;margin:6px 4px;}
+ QScrollArea{border:0;background:#0d1526;}
+ QStatusBar{background:#ffffff;}
  )");
 }
 
@@ -121,17 +196,25 @@ ControlWindow::ControlWindow(Controller& controller, QWidget* parent)
   auto pause = toolbar->addAction("暂停输入");
   toolbar->addSeparator();
   auto disconnect = toolbar->addAction("断开连接");
-  auto center = new QWidget;
+  auto center = new QFrame;
+  center->setObjectName("viewer");
+  center->setFrameShape(QFrame::NoFrame);
   auto layout = new QVBoxLayout(center);
-  layout->setContentsMargins(12, 12, 12, 12);
+  layout->setContentsMargins(0, 0, 0, 0);
+  layout->setSpacing(0);
   scroll_ = new QScrollArea;
   scroll_->setWidgetResizable(true);
   video_ = new VideoWidget;
   scroll_->setWidget(video_);
   layout->addWidget(scroll_, 1);
+  auto composer = new QFrame;
+  composer->setObjectName("composer");
+  auto composerLayout = new QVBoxLayout(composer);
+  composerLayout->setContentsMargins(16, 12, 16, 14);
+  composerLayout->setSpacing(10);
   status_ = label("点击远程画面选择目标，再发送文字。离开窗口会暂停输入。");
   status_->setObjectName("textStatus");
-  layout->addWidget(status_);
+  composerLayout->addWidget(status_);
   auto row = new QHBoxLayout;
   text_ = new QTextEdit;
   text_->setAccessibleName("发送到远端的文字");
@@ -141,7 +224,8 @@ ControlWindow::ControlWindow(Controller& controller, QWidget* parent)
   send_ = button("发送文字", "sendText", true);
   row->addWidget(text_, 1);
   row->addWidget(send_);
-  layout->addLayout(row);
+  composerLayout->addLayout(row);
+  layout->addWidget(composer);
   setCentralWidget(center);
   video_->send = [this](sdk::Json e) { controller_.input(std::move(e)); };
   video_->released = [this] { controller_.release(); };
@@ -225,29 +309,68 @@ void ControlWindow::changeEvent(QEvent* e) {
 MainWindow::MainWindow(bool test)
     : test_(test), host_(test, test ? std::make_shared<NoInput>() : nullptr) {
   setWindowTitle("AV Remote · 远程协助");
-  resize(1080, 740);
-  setMinimumSize(920, 680);
+  resize(1160, 780);
+  setMinimumSize(960, 700);
   setWindowIcon(app_icon());
   auto shell = new QWidget;
-  auto horizontal = new QHBoxLayout(shell);
+  auto outer = new QVBoxLayout(shell);
+  outer->setContentsMargins(0, 0, 0, 0);
+  outer->setSpacing(0);
+  auto topbar = new QFrame;
+  topbar->setObjectName("topbar");
+  topbar->setFixedHeight(60);
+  auto top = new QHBoxLayout(topbar);
+  top->setContentsMargins(24, 0, 24, 0);
+  auto topTitle = label("远程控制");
+  topTitle->setObjectName("topTitle");
+  top->addWidget(topTitle);
+  top->addStretch();
+  status_ = label("准备就绪");
+  status_->setObjectName("connectionStatus");
+  top->addWidget(status_);
+  outer->addWidget(topbar);
+  auto horizontal = new QHBoxLayout;
   horizontal->setContentsMargins(0, 0, 0, 0);
   horizontal->setSpacing(0);
-  auto side = new QWidget;
-  side->setFixedWidth(176);
-  side->setStyleSheet("background:#eaf0f9;");
+  outer->addLayout(horizontal, 1);
+  auto side = new QFrame;
+  side->setObjectName("sidebar");
+  side->setFrameShape(QFrame::NoFrame);
+  side->setFixedWidth(216);
   auto nav = new QVBoxLayout(side);
-  nav->setContentsMargins(16, 28, 16, 20);
-  nav->setSpacing(14);
-  auto brand = label("AV Remote");
-  brand->setStyleSheet("font-size:21px;font-weight:700;color:#1d4ed8;");
-  nav->addWidget(brand);
-  nav->addSpacing(32);
+  nav->setContentsMargins(16, 24, 16, 20);
+  nav->setSpacing(8);
+  auto brandRow = new QHBoxLayout;
+  brandRow->setSpacing(10);
+  auto logo = new QLabel;
+  logo->setPixmap(app_icon().pixmap(QSize(38, 38)));
+  logo->setFixedSize(38, 38);
+  brandRow->addWidget(logo);
+  auto brandText = new QVBoxLayout;
+  brandText->setSpacing(2);
+  auto brandName = label("AV Remote");
+  brandName->setObjectName("brandText");
+  auto brandSub = label("安全连接 · 需对方确认");
+  brandSub->setObjectName("brandSub");
+  brandText->addWidget(brandName);
+  brandText->addWidget(brandSub);
+  brandRow->addLayout(brandText);
+  nav->addLayout(brandRow);
+  nav->addSpacing(28);
+  auto caption = label("工作台");
+  caption->setObjectName("sideCaption");
+  nav->addWidget(caption);
   auto pages = new QStackedWidget;
   auto navigation = new QButtonGroup(this);
   navigation->setExclusive(true);
+  const char icons[] = {'m', 's', 'i'};
   for (auto title : {"远程控制", "设置", "关于"}) {
-    auto b = button(title, QString("nav") + title);
     int index = pages->count();
+    auto b = button(title, QString("nav") + title);
+    b->setProperty("nav", true);
+    b->setIcon(nav_icon(icons[index]));
+    b->setIconSize(QSize(20, 20));
+    b->setMinimumHeight(44);
     b->setCheckable(true);
     navigation->addButton(b, index);
     b->setChecked(index == 0);
@@ -257,27 +380,33 @@ MainWindow::MainWindow(bool test)
     nav->addWidget(b);
   }
   nav->addStretch();
-  nav->addWidget(label("局域网协助\n每次连接均需确认"));
+  auto note = label("局域网协助\n每次连接均需确认");
+  note->setObjectName("sideNote");
+  nav->addWidget(note);
   horizontal->addWidget(side);
   horizontal->addWidget(pages, 1);
   setCentralWidget(shell);
   auto home = new QVBoxLayout(pages->widget(0));
-  home->setContentsMargins(28, 28, 28, 24);
-  home->setSpacing(16);
-  auto title = label("连接彼此，协助就在眼前");
+  home->setContentsMargins(28, 26, 28, 24);
+  home->setSpacing(14);
+  auto title = label("远程协助");
   title->setObjectName("title");
   home->addWidget(title);
-  auto intro = label("共享连接码，确认后即可开始。你始终可以停止共享。");
-  intro->setObjectName("muted");
+  auto intro = label("输入对方连接码发起协助，或生成本机连接码接受协助。");
+  intro->setObjectName("subtitle");
   home->addWidget(intro);
+  home->addSpacing(4);
   auto cards = new QHBoxLayout;
+  cards->setSpacing(18);
   QVBoxLayout *local, *remote;
   auto localCard = card("允许控制本机", local);
+  localCard->setObjectName("localCard");
   auto remoteCard = card("连接远程设备", remote);
   cards->addWidget(localCard, 1);
   cards->addWidget(remoteCard, 1);
   home->addLayout(cards);
   auto codeLabel = label("本机连接码");
+  codeLabel->setObjectName("localCodeLabel");
   local->addWidget(codeLabel);
   code_ = new QLineEdit;
   code_->setReadOnly(true);
@@ -286,7 +415,7 @@ MainWindow::MainWindow(bool test)
   codeLabel->setBuddy(code_);
   local->addWidget(code_);
   expiry_ = label("10 位连接码 · 5 分钟有效 · 单次使用");
-  expiry_->setObjectName("muted");
+  expiry_->setObjectName("localHint");
   local->addWidget(expiry_);
   copy_ = button("复制连接码", "copyCode");
   create_ = button("生成连接码", "createCode", true);
@@ -312,13 +441,16 @@ MainWindow::MainWindow(bool test)
   remote->addWidget(name_);
   connect_ = button("连接远程设备", "connectRemote", true);
   remote->addWidget(connect_);
-  remote->addWidget(label("对方确认后才会共享画面。"));
+  auto peerHint = label("对方确认后才会共享画面。");
+  peerHint->setObjectName("muted");
+  remote->addWidget(peerHint);
   remote->addStretch();
   pending_ = new QFrame;
   pending_->setObjectName("card");
   auto requestLayout = new QVBoxLayout(pending_);
   requestLayout->setContentsMargins(18, 14, 18, 14);
   request_ = label("");
+  request_->setObjectName("cardTitle");
   requestLayout->addWidget(request_);
   auto decisions = new QHBoxLayout;
   approve_ = button("允许本次协助", "approve", true);
@@ -331,21 +463,21 @@ MainWindow::MainWindow(bool test)
   permissions_ = label("");
   permissions_->setObjectName("permissions");
   home->addWidget(permissions_);
-  status_ = label("准备就绪");
-  status_->setObjectName("connectionStatus");
-  home->addWidget(status_);
   shortcut_ = label("");
   shortcut_->setObjectName("muted");
   home->addWidget(shortcut_);
   stop_ = button("停止当前会话", "stopSession");
-  stop_->setStyleSheet("color:#b91c1c;");
   home->addWidget(stop_);
   home->addStretch();
   auto settings = new QVBoxLayout(pages->widget(1));
-  settings->setContentsMargins(28, 28, 28, 28);
+  settings->setContentsMargins(28, 26, 28, 28);
+  settings->setSpacing(14);
   auto settingsTitle = label("连接设置");
   settingsTitle->setObjectName("title");
   settings->addWidget(settingsTitle);
+  auto settingsIntro = label("业务服务地址与本机权限");
+  settingsIntro->setObjectName("subtitle");
+  settings->addWidget(settingsIntro);
   auto form = new QFormLayout;
   url_ = new QLineEdit;
   url_->setObjectName("serviceUrl");
@@ -365,10 +497,14 @@ MainWindow::MainWindow(bool test)
 #endif
   settings->addStretch();
   auto about = new QVBoxLayout(pages->widget(2));
-  about->setContentsMargins(28, 28, 28, 28);
+  about->setContentsMargins(28, 26, 28, 28);
+  about->setSpacing(14);
   auto aboutTitle = label("AV Remote");
   aboutTitle->setObjectName("title");
   about->addWidget(aboutTitle);
+  auto aboutIntro = label("面向可信局域网的远程协助");
+  aboutIntro->setObjectName("subtitle");
+  about->addWidget(aboutIntro);
   about->addWidget(
       label("Qt6 "
             "双平台远程协助\n\n主屏画面、键鼠操作与显式文字发送。\n每次协助需要"
