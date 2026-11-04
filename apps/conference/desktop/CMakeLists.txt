@@ -35,8 +35,20 @@ target_include_directories(livekit_demo_session PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(livekit_demo_session PUBLIC LiveKit::MediaEngine LiveKit::ServerSDK)
 add_library(av_meeting_widgets STATIC qt/api.cpp qt/api.hpp qt/video_widget.cpp qt/video_widget.hpp qt/window.cpp qt/window.hpp)
 target_link_libraries(av_meeting_widgets PUBLIC livekit_demo_session Qt6::Widgets Qt6::Network)
+# Deploy beside build-tree executables too, so launching them does not depend
+# on a developer's PATH or on running the separate install/package step.
+function(av_meeting_deploy_qt target)
+  if(WIN32)
+    add_custom_command(TARGET ${target} POST_BUILD
+      COMMAND Qt6::windeployqt
+        "$<IF:$<CONFIG:Debug>,--debug,--release>" --no-translations
+        "$<TARGET_FILE:${target}>"
+      VERBATIM)
+  endif()
+endfunction()
 add_executable(livekit_conference_demo main.cpp)
 target_link_libraries(livekit_conference_demo PRIVATE av_meeting_widgets)
+av_meeting_deploy_qt(livekit_conference_demo)
 if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set_target_properties(livekit_conference_demo PROPERTIES
     MACOSX_BUNDLE TRUE
@@ -91,6 +103,7 @@ if(BUILD_TESTING)
   target_link_libraries(livekit_demo_integration PRIVATE livekit_demo_session)
   add_executable(livekit_conference_business_integration tests/business_integration.cpp)
   target_link_libraries(livekit_conference_business_integration PRIVATE livekit_demo_session Qt6::Network)
+  av_meeting_deploy_qt(livekit_conference_business_integration)
   add_executable(av_meeting_audio_device_tests "${AV_SDK_SOURCE_DIR}/tests/rtc_output_tests.cpp")
   target_include_directories(av_meeting_audio_device_tests PRIVATE "${AV_SDK_SOURCE_DIR}/src")
   target_link_libraries(av_meeting_audio_device_tests PRIVATE graphflow::engine LiveKit::RTCOutputs WebRTC::webrtc)
@@ -99,10 +112,15 @@ if(BUILD_TESTING)
   find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
   add_executable(livekit_demo_tests tests/qt_tests.cpp)
   target_link_libraries(livekit_demo_tests PRIVATE av_meeting_widgets Qt6::Test)
+  av_meeting_deploy_qt(livekit_demo_tests)
   add_test(NAME conference_widgets COMMAND livekit_demo_tests)
   set_tests_properties(conference_widgets PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   if(WIN32)
-    set_property(TEST conference_widgets APPEND PROPERTY ENVIRONMENT_MODIFICATION
-      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+    add_custom_command(TARGET livekit_demo_tests POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:livekit_demo_tests>/platforms"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+        "$<TARGET_FILE_DIR:livekit_demo_tests>/platforms/"
+      VERBATIM)
   endif()
 endif()

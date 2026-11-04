@@ -48,6 +48,8 @@ ctest --preset conference-qt-windows
 cmake --install out/conference-qt-windows --config Release --prefix out/conference-qt-windows/package --component Conference
 ```
 
+Windows 构建会自动通过当前 Qt 安装中的 `windeployqt` 将 Qt DLL 和平台插件部署到可执行文件旁，可直接运行 `out/conference-qt-windows/Release/livekit_conference_demo.exe`，无需把 Qt 添加到系统 `PATH`。Qt 测试目标同时部署 Test 库和 offscreen 插件，支持直接无窗口运行。分发应用时仍使用上述安装命令，交付完整的 `package` 目录，不要只复制 exe。
+
 Qt 部署库须与目标架构、编译器 ABI 和最低系统版本匹配。Windows 及 ARM 的执行结果需在对应环境记录，本机 macOS x86_64 通过不代表其他平台已经验收。
 
 ## 自动化验证
