@@ -9,6 +9,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -16,18 +17,16 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QResizeEvent>
-#include <QScrollArea>
 #include <QSettings>
 #include <QShortcut>
 #include <QSpinBox>
 #include <QStackedWidget>
-#include <QStyle>
 #include <QTabWidget>
+#include <QVBoxLayout>
 #include <algorithm>
 
 namespace meeting {
@@ -35,36 +34,21 @@ namespace {
 QPushButton* button(QString text, QString name, QWidget* parent = nullptr) {
   auto* b = new QPushButton(text, parent);
   b->setObjectName(name);
-  b->setMinimumHeight(38);
+  b->setMinimumHeight(36);
   b->setCursor(Qt::PointingHandCursor);
   return b;
 }
 
-QIcon actionIcon(int kind) {
-  QPixmap pix(48, 48);
-  pix.fill(Qt::transparent);
-  QPainter p(&pix);
-  p.setRenderHint(QPainter::Antialiasing);
-  p.setPen(QPen(QColor("#1768da"), 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-  if (kind == 0) {
-    p.drawRoundedRect(QRectF(7, 7, 34, 34), 8, 8);
-    p.drawLine(24, 15, 24, 33);
-    p.drawLine(15, 24, 33, 24);
-  } else if (kind == 1) {
-    p.drawRoundedRect(QRectF(5, 12, 27, 25), 5, 5);
-    QPolygonF shape;
-    shape << QPointF(33, 19) << QPointF(43, 13) << QPointF(43, 36) << QPointF(33, 30);
-    p.drawPolyline(shape);
-  } else {
-    p.drawRoundedRect(QRectF(7, 10, 34, 31), 5, 5);
-    p.drawLine(15, 6, 15, 15);
-    p.drawLine(33, 6, 33, 15);
-    p.drawLine(8, 21, 40, 21);
-    p.drawPoint(17, 29);
-    p.drawPoint(25, 29);
-    p.drawPoint(33, 29);
-  }
-  return QIcon(pix);
+// Self-drawn brand mark: no third-party logo or artwork is shipped.
+QLabel* brand_mark(int size = 34) {
+  auto* l = new QLabel("AV");
+  l->setAlignment(Qt::AlignCenter);
+  l->setFixedSize(size, size);
+  l->setStyleSheet(QString("background:#006eff;color:#ffffff;border-radius:%1px;"
+                           "font-size:%2px;font-weight:600;")
+                       .arg(size / 4)
+                       .arg(size > 30 ? 13 : 10));
+  return l;
 }
 
 QLabel* label(QString text, QString name = {}) {
@@ -96,20 +80,38 @@ QString numberFrom(QString text) {
       QRegularExpression("(?<![0-9])([0-9]{3})[ -]?([0-9]{3})[ -]?([0-9]{3})(?![0-9])").match(text);
   return m.hasMatch() ? m.captured(1) + m.captured(2) + m.captured(3) : QString();
 }
+
+QString spacedNumber(QString number) {
+  QString out;
+  for (int i = 0; i < number.size(); ++i) {
+    if (i && i % 3 == 0)
+      out += ' ';
+    out += number.at(i);
+  }
+  return out;
+}
 }  // namespace
 
 Window::Window(bool running) : running_(running) {
   setObjectName("conferenceWindow");
   setWindowTitle("AV 会议");
-  resize(1180, 780);
-  setMinimumSize(800, 560);
+  resize(1000, 680);
+  setMinimumSize(820, 560);
   QSettings prefs;
   api_.base = prefs.value("server", "http://127.0.0.1:8080").toString();
   cameraIndex_ = prefs.value("camera", 0).toInt();
   if (running_)
     restoreGeometry(prefs.value("geometry").toByteArray());
-  setStyleSheet(
-      R"(QWidget {font-size:14px;color:#253044;} QMainWindow,QDialog {background:#f5f7fb;} QLabel#brand {font-size:25px;font-weight:600;color:#1768da;} QLabel#heading {font-size:27px;font-weight:600;} QLabel#subtle {color:#64738b;} QLabel#notice {color:#a13b21;background:#fff2e7;border-radius:5px;padding:7px;} QPushButton {background:white;border:1px solid #d9e0ea;border-radius:7px;padding:8px 15px;} QPushButton:hover {background:#eaf2ff;border-color:#87afea;} QPushButton:pressed {background:#d9e8ff;} QPushButton:focus,QLineEdit:focus,QPlainTextEdit:focus,QComboBox:focus {border:2px solid #1971e6;} QPushButton:disabled {color:#8993a3;background:#edf0f5;} QPushButton#primary {background:#1768da;color:white;border:1px solid #1768da;} QPushButton#danger {color:#c0313e;border-color:#e9c6cb;} QLineEdit,QPlainTextEdit,QComboBox,QSpinBox,QDateTimeEdit {background:white;border:1px solid #d6deea;border-radius:5px;padding:7px;selection-background-color:#1768da;} QListWidget {background:white;border:1px solid #e1e6ee;border-radius:9px;padding:8px;outline:0;} QListWidget::item {padding:14px;border-bottom:1px solid #eef1f6;} QListWidget::item:selected {background:#e6efff;color:#174b96;} QTabWidget::pane {border:1px solid #d9e0ea;background:white;} QTabBar::tab {padding:10px 20px;background:#edf2f9;} QTabBar::tab:selected {background:white;color:#1768da;} QCheckBox {spacing:8px;} QWidget#meetingPage {background:#151a22;} QWidget#meetingPage QLabel {color:#dfe7f5;} QWidget#meetingPage QPushButton {background:#252e3d;color:#e7edf7;border-color:#3c475a;} QWidget#meetingPage QPushButton#danger {color:#ff929c;} QWidget#meetingPage QPlainTextEdit,QWidget#meetingPage QListWidget {background:#202834;color:#e5ecf7;border-color:#354052;} QWidget#meetingPage QListWidget::item {border-bottom:1px solid #354052;} QWidget#meetingPage QTabWidget::pane {background:#202834;border-color:#354052;})");
+  setStyleSheet(ui::style_sheet());
+
+  // Qt only paints stylesheet backgrounds for plain QWidgets when this flag
+  // is set; every full-bleed surface below goes through the helper.
+  auto surface = [](QString name) {
+    auto* w = new QWidget;
+    w->setObjectName(name);
+    w->setAttribute(Qt::WA_StyledBackground, true);
+    return w;
+  };
   auto* root = new QWidget;
   auto* outer = new QVBoxLayout(root);
   outer->setContentsMargins(0, 0, 0, 0);
@@ -120,39 +122,56 @@ Window::Window(bool running) : running_(running) {
   pages_ = new QStackedWidget;
   outer->addWidget(pages_, 1);
   setCentralWidget(root);
-  home_ = new QWidget;
-  home_->setObjectName("homePage");
-  auto* h = new QVBoxLayout(home_);
-  h->setContentsMargins(38, 26, 38, 28);
-  h->setSpacing(20);
-  auto* bar = new QHBoxLayout;
-  bar->addWidget(label("AV 会议", "brand"));
-  bar->addStretch();
+
+  // Home: navigation rail plus card-based meeting actions.
+  home_ = surface("homePage");
+  auto* home = new QHBoxLayout(home_);
+  home->setContentsMargins(0, 0, 0, 0);
+  home->setSpacing(0);
+  auto* rail = surface("navRail");
+  rail->setFixedWidth(72);
+  auto* railLayout = new QVBoxLayout(rail);
+  railLayout->setContentsMargins(0, 14, 6, 14);
+  railLayout->setSpacing(4);
+  railLayout->addWidget(brand_mark(36), 0, Qt::AlignHCenter);
+  railLayout->addSpacing(20);
+  auto* navMeetings = new ui::NavButton("会议", ui::Glyph::Home, "navMeetings", rail);
+  auto* navHistory = new ui::NavButton("历史", ui::Glyph::Clock, "navHistory", rail);
+  railLayout->addWidget(navMeetings, 0, Qt::AlignHCenter);
+  railLayout->addWidget(navHistory, 0, Qt::AlignHCenter);
+  railLayout->addStretch(1);
+  auto* navSettings = new ui::NavButton("设置", ui::Glyph::Gear, "settingsButton", rail);
+  accountButton_ = new ui::NavButton("登录", ui::Glyph::Members, "accountButton", rail);
+  railLayout->addWidget(navSettings, 0, Qt::AlignHCenter);
+  railLayout->addWidget(accountButton_, 0, Qt::AlignHCenter);
+  home->addWidget(rail);
+
+  auto* content = new QWidget;
+  auto* c = new QVBoxLayout(content);
+  c->setContentsMargins(30, 22, 30, 18);
+  c->setSpacing(12);
+  auto* headline = new QHBoxLayout;
+  headline->addWidget(label("AV 会议", "brand"));
+  headline->addStretch(1);
   account_ = label("游客", "subtle");
-  bar->addWidget(account_);
-  auto* auth = button("登录 / 注册", "accountButton");
-  connect(auth, &QPushButton::clicked, this, &Window::login);
-  bar->addWidget(auth);
-  auto* setting = button("设置", "settingsButton");
-  connect(setting, &QPushButton::clicked, this, &Window::settings);
-  bar->addWidget(setting);
-  h->addLayout(bar);
-  h->addSpacing(14);
-  h->addWidget(label("每一次沟通，都更近一步", "heading"));
-  h->addWidget(label("开启一场会议，与团队保持连接。", "subtle"));
+  headline->addWidget(account_);
+  headline->addSpacing(14);
+  headline->addWidget(label(QDateTime::currentDateTime().toString("M月d日"), "subtle"));
+  c->addLayout(headline);
+  c->addSpacing(2);
+  c->addWidget(label("你好，欢迎回来", "heading"));
+  c->addWidget(label("发起或加入一场会议，与团队保持连接。", "subtle"));
   auto* actions = new QHBoxLayout;
-  actions->setSpacing(20);
-  auto* add = button("加入会议", "joinButton");
-  auto* quick = button("快速会议", "quickButton");
-  auto* plan = button("预定会议", "scheduleButton");
-  int actionIndex = 0;
-  for (auto* b : {add, quick, plan}) {
-    b->setIcon(actionIcon(actionIndex++));
-    b->setIconSize(QSize(48, 48));
-    b->setMinimumHeight(118);
-    actions->addWidget(b);
-  }
-  h->addLayout(actions);
+  actions->setSpacing(16);
+  auto* add = new ui::ActionCard("加入会议", ui::Glyph::Plus, true);
+  add->setObjectName("joinButton");
+  auto* quick = new ui::ActionCard("快速会议", ui::Glyph::Video, false);
+  quick->setObjectName("quickButton");
+  auto* plan = new ui::ActionCard("预定会议", ui::Glyph::Calendar, false);
+  plan->setObjectName("scheduleButton");
+  for (auto* b : {add, quick, plan})
+    actions->addWidget(b, 1);
+  c->addLayout(actions);
   connect(add, &QPushButton::clicked, this, &Window::joinDialog);
   connect(plan, &QPushButton::clicked, this, [this] { schedule(); });
   connect(quick, &QPushButton::clicked, this, [this] {
@@ -171,89 +190,173 @@ Window::Window(bool running) : running_(running) {
                         {});
                  });
   });
-  auto* lists = new QHBoxLayout;
-  auto* left = new QVBoxLayout;
-  left->addWidget(label("我的会议", "sectionTitle"));
+  c->addWidget(label("会议列表", "sectionTitle"));
+  homeTabs_ = new QTabWidget;
+  homeTabs_->setObjectName("homeTabs");
   upcoming_ = new QListWidget;
   upcoming_->setObjectName("upcomingMeetings");
-  left->addWidget(upcoming_);
-  auto* right = new QVBoxLayout;
-  right->addWidget(label("历史会议", "sectionTitle"));
   history_ = new QListWidget;
   history_->setObjectName("meetingHistory");
   upcoming_->addItem("登录后创建会议，或直接加入会议");
   history_->addItem("暂无历史会议");
-  right->addWidget(history_);
-  lists->addLayout(left, 3);
-  lists->addLayout(right, 2);
-  h->addLayout(lists, 1);
-  h->addWidget(label("默认不开启摄像头和麦克风 · 最多 25 人", "subtle"));
+  homeTabs_->addTab(upcoming_, "即将开始");
+  homeTabs_->addTab(history_, "历史会议");
+  c->addWidget(homeTabs_, 1);
+  c->addWidget(label("默认不开启摄像头和麦克风 · 单场会议最多 25 人", "subtle"));
+  home->addWidget(content, 1);
+  navMeetings->set_selected(true);
+  connect(navMeetings, &QPushButton::clicked, this, [this, navMeetings, navHistory] {
+    homeTabs_->setCurrentIndex(0);
+    navMeetings->set_selected(true);
+    navHistory->set_selected(false);
+  });
+  connect(navHistory, &QPushButton::clicked, this, [this, navMeetings, navHistory] {
+    homeTabs_->setCurrentIndex(1);
+    navMeetings->set_selected(false);
+    navHistory->set_selected(true);
+  });
+  connect(navSettings, &QPushButton::clicked, this, &Window::settings);
+  connect(accountButton_, &QPushButton::clicked, this, &Window::login);
   connect(upcoming_, &QListWidget::itemDoubleClicked, this, [this] { showDetails(upcoming_); });
   connect(history_, &QListWidget::itemDoubleClicked, this, [this] { showDetails(history_); });
   pages_->addWidget(home_);
-  waiting_ = new QWidget;
-  waiting_->setObjectName("waitingPage");
+
+  // Waiting room: a centered card, matching the pre-meeting light theme.
+  waiting_ = surface("waitingPage");
   auto* w = new QVBoxLayout(waiting_);
-  w->setContentsMargins(100, 50, 100, 50);
-  w->addStretch();
-  w->addWidget(label("会议即将开始", "heading"));
+  w->addStretch(1);
+  auto* waitCard = surface("waitingCard");
+  waitCard->setFixedWidth(420);
+  auto* cv = new QVBoxLayout(waitCard);
+  cv->setContentsMargins(34, 30, 34, 28);
+  cv->setSpacing(12);
+  auto* waitIcon = new QLabel;
+  waitIcon->setPixmap(
+      ui::glyph(ui::Glyph::Shield, QColor("#006eff"), 48).pixmap(QSize(48, 48)));
+  waitIcon->setFixedHeight(56);
+  waitIcon->setAlignment(Qt::AlignCenter);
+  cv->addWidget(waitIcon, 0, Qt::AlignHCenter);
+  auto* waitTitle = label("会议即将开始", "heading");
+  waitTitle->setAlignment(Qt::AlignCenter);
+  cv->addWidget(waitTitle);
   waitingText_ = label("正在提交入会申请…", "waitingText");
-  w->addWidget(waitingText_);
-  w->addSpacing(20);
+  waitingText_->setAlignment(Qt::AlignCenter);
+  cv->addWidget(waitingText_);
+  cv->addSpacing(8);
   auto* cancel = button("取消入会", "cancelJoin");
+  cv->addWidget(cancel, 0, Qt::AlignHCenter);
   connect(cancel, &QPushButton::clicked, this, [this] { leave(); });
-  w->addWidget(cancel);
-  w->addStretch();
+  w->addWidget(waitCard, 0, Qt::AlignHCenter);
+  w->addStretch(1);
   pages_->addWidget(waiting_);
-  meeting_ = new QWidget;
-  meeting_->setObjectName("meetingPage");
+
+  // In-meeting: dark chrome, video stage on a black canvas, collapsible side
+  // drawer and an icon-over-label toolbar.
+  meeting_ = surface("meetingPage");
   auto* meet = new QVBoxLayout(meeting_);
-  meet->setContentsMargins(16, 12, 16, 12);
-  auto* titlebar = new QHBoxLayout;
+  meet->setContentsMargins(0, 0, 0, 0);
+  meet->setSpacing(0);
+  auto* topbar = surface("meetingTopBar");
+  topbar->setFixedHeight(52);
+  auto* tb = new QHBoxLayout(topbar);
+  tb->setContentsMargins(16, 0, 14, 0);
+  tb->setSpacing(10);
+  tb->addWidget(brand_mark(26));
   meetingTitle_ = label("AV 会议", "meetingTitle");
-  titlebar->addWidget(meetingTitle_, 1);
-  connection_ = label("正在连接", "connectionState");
-  titlebar->addWidget(connection_);
+  meetingTitle_->setWordWrap(false);
+  meetingTitle_->setMaximumWidth(340);
+  tb->addWidget(meetingTitle_);
+  meetingNumber_ = label({}, "meetingNumber");
+  meetingNumber_->setWordWrap(false);
+  tb->addWidget(meetingNumber_);
+  connection_ = label("正在连接", "meetingSubtle");
+  connection_->setWordWrap(false);
+  connection_->setMinimumWidth(112);
+  memberCount_ = label({}, "memberCount");
+  memberCount_->setWordWrap(false);
+  memberCount_->setMinimumWidth(52);
+  tb->addStretch(1);
+  tb->addWidget(connection_);
+  tb->addWidget(memberCount_);
   layout_ = new QComboBox;
   layout_->setObjectName("layoutMode");
-  layout_->addItems({"宫格布局", "演讲者布局", "共享优先"});
+  layout_->addItems({"宫格视图", "演讲者视图", "共享优先"});
   connect(layout_, &QComboBox::currentIndexChanged, this, [this] {
     videoPage_ = 0;
     updateVideos();
   });
-  titlebar->addWidget(layout_);
-  meet->addLayout(titlebar);
-  auto* content = new QHBoxLayout;
+  tb->addWidget(layout_);
+  meet->addWidget(topbar);
+
+  auto* body = new QHBoxLayout;
+  body->setContentsMargins(0, 0, 0, 0);
+  body->setSpacing(0);
+  auto* stage = surface("videoStage");
+  auto* sv = new QVBoxLayout(stage);
+  sv->setContentsMargins(12, 12, 12, 8);
+  sv->setSpacing(8);
   auto* canvas = new QWidget;
   grid_ = new QGridLayout(canvas);
   grid_->setContentsMargins(0, 0, 0, 0);
   grid_->setSpacing(8);
-  content->addWidget(canvas, 1);
+  sv->addWidget(canvas, 1);
   for (int i = 0; i < 9; i++) {
     auto* tile = new VideoWidget(canvas);
     videos_.push_back(tile);
     tile->hide();
   }
+  auto* pagination = new QHBoxLayout;
+  pagination->setSpacing(8);
+  pagination->addStretch(1);
+  auto* prev = button({}, "previousPage");
+  prev->setToolTip("上一页");
+  prev->setFixedSize(28, 28);
+  prev->setIcon(ui::glyph(ui::Glyph::ChevronLeft, QColor("#e7e9ee"), 18));
+  auto* next = button({}, "nextPage");
+  next->setToolTip("下一页");
+  next->setFixedSize(28, 28);
+  next->setIcon(ui::glyph(ui::Glyph::ChevronRight, QColor("#e7e9ee"), 18));
+  pageLabel_ = label("1 / 1", "pageLabel");
+  pagination->addWidget(prev);
+  pagination->addWidget(pageLabel_);
+  pagination->addWidget(next);
+  pagination->addStretch(1);
+  sv->addLayout(pagination);
+  connect(prev, &QPushButton::clicked, this, [this] {
+    videoPage_ = std::max(0, videoPage_ - 1);
+    updateVideos();
+  });
+  connect(next, &QPushButton::clicked, this, [this] {
+    ++videoPage_;
+    updateVideos();
+  });
+  body->addWidget(stage, 1);
+
   side_ = new QTabWidget;
   side_->setObjectName("meetingSidePanel");
-  side_->setMinimumWidth(240);
-  side_->setMaximumWidth(310);
+  side_->setAttribute(Qt::WA_StyledBackground, true);
+  side_->setFixedWidth(288);
   members_ = new QListWidget;
   members_->setObjectName("memberList");
   side_->addTab(members_, "成员");
   auto* chat = new QWidget;
   auto* chatLayout = new QVBoxLayout(chat);
+  chatLayout->setContentsMargins(10, 10, 10, 10);
+  chatLayout->setSpacing(8);
   chatLog_ = new QPlainTextEdit;
   chatLog_->setReadOnly(true);
   chatLog_->setObjectName("chatHistory");
   chatInput_ = new QPlainTextEdit;
   chatInput_->setObjectName("chatInput");
   chatInput_->setPlaceholderText("发送给所有人，Ctrl+Enter 发送");
-  chatInput_->setMaximumHeight(100);
+  chatInput_->setFixedHeight(72);
   auto* send = button("发送", "sendChat");
+  auto* sendRow = new QHBoxLayout;
+  sendRow->addStretch(1);
+  sendRow->addWidget(send);
   chatLayout->addWidget(chatLog_, 1);
   chatLayout->addWidget(chatInput_);
-  chatLayout->addWidget(send);
+  chatLayout->addLayout(sendRow);
   side_->addTab(chat, "聊天");
   auto sendMessage = [this] {
     try {
@@ -266,42 +369,43 @@ Window::Window(bool running) : running_(running) {
   connect(send, &QPushButton::clicked, this, sendMessage);
   connect(new QShortcut(QKeySequence("Ctrl+Return"), chatInput_), &QShortcut::activated, this,
           sendMessage);
-  content->addWidget(side_);
-  meet->addLayout(content, 1);
-  auto* pagination = new QHBoxLayout;
-  pagination->addStretch();
-  auto* prev = button("上一页", "previousPage");
-  auto* next = button("下一页", "nextPage");
-  pageLabel_ = label("1 / 1");
-  pagination->addWidget(prev);
-  pagination->addWidget(pageLabel_);
-  pagination->addWidget(next);
-  pagination->addStretch();
-  meet->addLayout(pagination);
-  connect(prev, &QPushButton::clicked, this, [this] {
-    videoPage_ = std::max(0, videoPage_ - 1);
-    updateVideos();
-  });
-  connect(next, &QPushButton::clicked, this, [this] {
-    ++videoPage_;
-    updateVideos();
-  });
-  auto* toolbar = new QGridLayout;
-  toolbar_ = toolbar;
-  mic_ = button("开启麦克风", "microphoneButton");
-  camera_ = button("开启摄像头", "cameraButton");
-  share_ = button("共享屏幕", "shareButton");
-  auto* inviteButton = button("邀请", "inviteButton");
-  manage_ = button("管理成员", "manageButton");
-  auto* chatButton = button("聊天", "chatButton");
-  auto* leaveButton = button("离开会议", "danger");
-  int col = 0;
-  for (auto* b : {mic_, camera_, share_, inviteButton, manage_, chatButton, leaveButton}) {
+  body->addWidget(side_);
+  meet->addLayout(body, 1);
+
+  auto* toolbar = surface("meetingToolbar");
+  toolbar->setFixedHeight(78);
+  auto* tl = new QHBoxLayout(toolbar);
+  tl->setContentsMargins(16, 0, 16, 0);
+  tl->setSpacing(4);
+  tl->addStretch(1);
+  mic_ = new ui::ToolButton("静音", ui::Glyph::Mic);
+  mic_->setObjectName("microphoneButton");
+  camera_ = new ui::ToolButton("关闭视频", ui::Glyph::Camera);
+  camera_->setObjectName("cameraButton");
+  share_ = new ui::ToolButton("共享屏幕", ui::Glyph::Share);
+  share_->setObjectName("shareButton");
+  auto* inviteButton = new ui::ToolButton("邀请", ui::Glyph::Invite);
+  inviteButton->setObjectName("inviteButton");
+  manage_ = new ui::ToolButton("成员", ui::Glyph::Members);
+  manage_->setObjectName("manageButton");
+  auto* chatButton = new ui::ToolButton("聊天", ui::Glyph::Chat);
+  chatButton->setObjectName("chatButton");
+  auto* leaveButton = new ui::ToolButton("离开", ui::Glyph::Leave);
+  leaveButton->setObjectName("leaveButton");
+  leaveButton->set_danger(true);
+  for (auto* b : {mic_, camera_, share_, inviteButton, manage_, chatButton}) {
     toolbarButtons_.push_back(b);
-    toolbar->addWidget(b, col / 7, col % 7);
-    ++col;
+    tl->addWidget(b);
   }
-  meet->addLayout(toolbar);
+  tl->addStretch(1);
+  auto* separator = surface("toolbarSeparator");
+  separator->setFixedSize(1, 36);
+  separator->setStyleSheet("background:#3a3e47;");
+  tl->addWidget(separator);
+  tl->addSpacing(12);
+  tl->addWidget(leaveButton);
+  toolbarButtons_.push_back(leaveButton);
+  meet->addWidget(toolbar);
   connect(mic_, &QPushButton::clicked, this, &Window::toggleMicrophone);
   connect(camera_, &QPushButton::clicked, this, &Window::toggleCamera);
   connect(share_, &QPushButton::clicked, this, &Window::toggleShare);
@@ -367,6 +471,7 @@ void Window::login() {
         api_.token.clear();
         user_ = {};
         account_->setText("游客");
+        accountButton_->setText("登录");
         refreshHome();
       });
     }
@@ -406,6 +511,7 @@ void Window::login() {
                    api_.guest.clear();
                    user_ = v.toObject().value("user").toObject();
                    account_->setText(user_.value("name").toString());
+                   accountButton_->setText("账号");
                    guard->accept();
                    message({});
                    refreshHome();
@@ -475,6 +581,7 @@ void Window::settings() {
       api_.guest.clear();
       user_ = {};
       account_->setText("游客");
+      accountButton_->setText("登录");
     }
     cameraIndex_ = std::max(0, devices->currentIndex());
     QSettings p;
@@ -713,8 +820,11 @@ void Window::applyBusiness(QJsonObject state) {
       pages_->setCurrentWidget(home_);
     return;
   }
-  meetingTitle_->setText(state.value("title").toString() + "  ·  " +
-                         state.value("number").toString());
+  const QString title = state.value("title").toString();
+  meetingTitle_->setText(fontMetrics().elidedText(title, Qt::ElideRight, 320));
+  meetingTitle_->setToolTip(title);
+  meetingNumber_->setText("会议号 " + spacedNumber(state.value("number").toString()));
+  memberCount_->setText(QString("%1 人").arg(state.value("members").toArray().size()));
   auto selectedMember =
       members_->currentItem() ? members_->currentItem()->data(Qt::UserRole).toString() : QString();
   members_->clear();
@@ -878,9 +988,14 @@ void Window::applyMedia(const demo::Snapshot& snapshot) {
         sharing = true;
     }
   }
-  mic_->setText(microphone ? "静音" : "开启麦克风");
-  camera_->setText(camera ? "关闭摄像头" : "开启摄像头");
-  share_->setText(sharing ? "停止共享" : "共享屏幕");
+  mic_->setText(microphone ? "静音" : "解除静音");
+  mic_->set_glyph(microphone ? ui::Glyph::Mic : ui::Glyph::MicOff);
+  mic_->set_danger(!microphone);
+  camera_->setText(camera ? "关闭视频" : "开启视频");
+  camera_->set_glyph(camera ? ui::Glyph::Camera : ui::Glyph::CameraOff);
+  camera_->set_danger(!camera);
+  share_->setText(sharing ? "结束共享" : "共享屏幕");
+  share_->set_glyph(ui::Glyph::Share, sharing ? QColor("#4d94ff") : QColor("#e7e9ee"));
   QString text;
   for (auto& m : snapshot.chat.messages()) {
     text += str(m.name.empty() ? m.sender : m.name) + "\n" + str(m.text) + "\n";
@@ -1151,13 +1266,12 @@ void Window::exitMeeting() {
 
 void Window::resizeEvent(QResizeEvent* event) {
   QMainWindow::resizeEvent(event);
-  if (!toolbar_)
-    return;
-  while (auto* item = toolbar_->takeAt(0))
-    delete item;
-  const int columns = width() >= 1060 ? 7 : 4;
-  for (size_t i = 0; i < toolbarButtons_.size(); ++i)
-    toolbar_->addWidget(toolbarButtons_[i], int(i) / columns, int(i) % columns);
+  // Narrow windows keep every action reachable: icons only, smaller drawer.
+  const bool compact = width() < 960;
+  for (auto* item : toolbarButtons_)
+    item->set_compact(compact);
+  if (side_)
+    side_->setFixedWidth(compact ? 230 : 288);
 }
 
 void Window::closeEvent(QCloseEvent* event) {

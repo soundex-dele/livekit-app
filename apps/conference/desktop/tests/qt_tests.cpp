@@ -9,6 +9,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStackedWidget>
+#include <QTabWidget>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -127,6 +128,10 @@ class MeetingTests : public QObject {
     window.applyMedia(snapshot);
     QCOMPARE(pages->currentWidget()->objectName(), QString("meetingPage"));
     save("meeting");
+    auto* side = window.findChild<QTabWidget*>("meetingSidePanel");
+    side->setCurrentIndex(1);
+    save("meeting-chat");
+    side->setCurrentIndex(0);
     QTest::mouseClick(window.findChild<QPushButton*>("nextPage"), Qt::LeftButton);
     window.resize(800, 560);
     save("meeting-narrow");
@@ -163,6 +168,48 @@ class MeetingTests : public QObject {
     state["state"] = "ended";
     window.applyBusiness(state);
     QCOMPARE(pages->currentWidget()->objectName(), QString("homePage"));
+    window.close();
+  }
+
+  void referenceStyleStructure() {
+    meeting::Window window(false);
+    window.resize(1180, 780);
+    window.show();
+    QVERIFY(window.findChild<QWidget*>("navRail"));
+    auto* homeTabs = window.findChild<QTabWidget*>("homeTabs");
+    QVERIFY(homeTabs);
+    QCOMPARE(homeTabs->tabText(0), QString("即将开始"));
+    QCOMPARE(homeTabs->tabText(1), QString("历史会议"));
+    auto* join = window.findChild<QPushButton*>("joinButton");
+    QVERIFY(join);
+    QCOMPARE(join->property("variant").toString(), QString("card"));
+    auto* account = window.findChild<QPushButton*>("accountButton");
+    QVERIFY(account);
+    QCOMPARE(account->property("variant").toString(), QString("nav"));
+    QVERIFY(window.findChild<QWidget*>("meetingTopBar"));
+    QVERIFY(window.findChild<QWidget*>("meetingToolbar"));
+    QVERIFY(window.findChild<QWidget*>("videoStage"));
+    int toolCount = 0;
+    for (auto* button : window.findChildren<QPushButton*>()) {
+      if (button->property("variant").toString() == "tool")
+        ++toolCount;
+    }
+    QCOMPARE(toolCount, 7);
+    auto* leave = window.findChild<QPushButton*>("leaveButton");
+    QVERIFY(leave);
+    QCOMPARE(leave->property("variant").toString(), QString("tool"));
+    QJsonObject state{{"id", "demo"},
+                      {"title", "产品设计评审"},
+                      {"number", "123456789"},
+                      {"state", "active"},
+                      {"status", "approved"},
+                      {"self", "0"},
+                      {"host", "0"},
+                      {"members", QJsonArray{}}};
+    window.applyBusiness(state);
+    QCOMPARE(window.findChild<QLabel*>("meetingTitle")->text(), QString("产品设计评审"));
+    QCOMPARE(window.findChild<QLabel*>("meetingNumber")->text(),
+             QString("会议号 123 456 789"));
     window.close();
   }
 

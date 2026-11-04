@@ -33,7 +33,7 @@ set(CMAKE_AUTORCC ON)
 add_library(livekit_demo_session STATIC session.cpp session_runtime.cpp chat.cpp)
 target_include_directories(livekit_demo_session PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(livekit_demo_session PUBLIC LiveKit::MediaEngine LiveKit::ServerSDK)
-add_library(av_meeting_widgets STATIC qt/api.cpp qt/api.hpp qt/video_widget.cpp qt/video_widget.hpp qt/window.cpp qt/window.hpp)
+add_library(av_meeting_widgets STATIC qt/api.cpp qt/api.hpp qt/theme.cpp qt/theme.hpp qt/video_widget.cpp qt/video_widget.hpp qt/window.cpp qt/window.hpp)
 target_link_libraries(av_meeting_widgets PUBLIC livekit_demo_session Qt6::Widgets Qt6::Network)
 # Deploy beside build-tree executables too, so launching them does not depend
 # on a developer's PATH or on running the separate install/package step.

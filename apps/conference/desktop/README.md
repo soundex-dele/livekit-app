@@ -2,6 +2,12 @@
 
 C++17 + Qt 6 Widgets 的自有会议产品，使用独立 RTC backend、逐轨 GraphEngine 和会议业务服务。Windows/macOS，单会最多 25 人。会议 GUI 不再使用 ImGui/SDL；其他 APP 的界面不受本产品构建影响。
 
+## 界面
+
+界面结构对标腾讯会议桌面客户端：首页为左侧导航栏 + 蓝色主操作卡片 + 会议列表 Tab；会中页为深色顶栏、近黑视频舞台（每页九宫格 / 演讲者 / 共享优先）、右侧成员与聊天抽屉，以及图标在上、文字在下的底部工具栏，静音与关闭视频用红色图标反馈；等候室和登录、入会、预约、设置对话框统一浅色卡片风格。窗口变窄时工具栏自动切为纯图标、侧栏收窄。
+
+借鉴的是布局、配色与交互范式，产品仍使用自有品牌「AV 会议」和运行时 QPainter 自绘图标，不包含腾讯会议的商标、图标素材或界面截图。界面实现集中在 `qt/theme.*`（色板、QSS、自绘图标与控件）、`qt/window.cpp`（页面结构）和 `qt/video_widget.cpp`（视频瓦片）；业务、媒体与数据通道逻辑未改动，原有控件 objectName 保持不变以兼容 Qt 组件测试。
+
 ## 功能
 
 - 自有账号注册/登录、游客按九位会议号加入、复制邀请文本。
@@ -60,7 +66,7 @@ AV_MEETING_SCREENSHOT_DIR="$PWD/out/conference-qt-macos-x86_64/screenshots" \
   out/conference-qt-macos-x86_64/Release/livekit_demo_tests
 ```
 
-Qt Test 通过程序内事件及 `QWidget::render()` 验证页面、输入、布局和截图，不操作用户桌面。I420 测试覆盖奇数尺寸、步长、颜色和等比显示；异步测试覆盖最新帧批次及取消后的过期 HTTP 响应。
+Qt Test 通过程序内事件及 `QWidget::render()` 验证页面、输入、布局和截图，不操作用户桌面。offscreen 平台不带字体，程序内截图需挂系统中文字体（Windows 上设 `QT_QPA_FONTDIR=C:/Windows/Fonts`），否则中文会渲染成方框；这不影响真实桌面运行。I420 测试覆盖奇数尺寸、步长、颜色和等比显示；异步测试覆盖最新帧批次及取消后的过期 HTTP 响应。
 
 全链路联调运行 `tests/run_business_integration.py`，参数为 `--client`（`livekit_conference_business_integration`）、`--media-server`（本仓库 `livekit-cpp` 服务）、`--business-server`（Go `business-api`）。测试使用独立数据库、端口与合成媒体，不采集真实设备。
 

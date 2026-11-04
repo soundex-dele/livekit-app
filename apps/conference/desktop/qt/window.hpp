@@ -1,6 +1,7 @@
 #pragma once
 #include "../session.hpp"
 #include "api.hpp"
+#include "theme.hpp"
 #include "video_widget.hpp"
 #include <QElapsedTimer>
 #include <QJsonArray>
@@ -38,15 +39,16 @@ class Window : public QMainWindow {
   QTimer tick_, poll_, homeTimer_;
   QStackedWidget* pages_;
   QWidget *home_, *waiting_, *meeting_;
-  QLabel *notice_, *account_, *meetingTitle_, *waitingText_, *connection_, *pageLabel_;
+  QLabel *notice_, *account_, *meetingTitle_, *meetingNumber_, *memberCount_,
+      *waitingText_, *connection_, *pageLabel_;
   QListWidget *upcoming_, *history_, *members_;
   QPlainTextEdit *chatLog_, *chatInput_;
-  QTabWidget* side_;
-  QPushButton *mic_, *camera_, *share_, *manage_;
+  QTabWidget *homeTabs_, *side_;
+  QPushButton* accountButton_ = nullptr;
+  ui::ToolButton *mic_, *camera_, *share_, *manage_;
   QComboBox* layout_;
   QGridLayout* grid_;
-  QGridLayout* toolbar_ = nullptr;
-  std::vector<QPushButton*> toolbarButtons_;
+  std::vector<ui::ToolButton*> toolbarButtons_;
   std::vector<VideoWidget*> videos_;
   QJsonObject user_, business_;
   QJsonArray meetings_;

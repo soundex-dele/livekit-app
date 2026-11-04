@@ -1,5 +1,8 @@
 #include "video_widget.hpp"
+#include "theme.hpp"
+#include <QLinearGradient>
 #include <QPainter>
+#include <QPainterPath>
 #include <algorithm>
 #include <stdexcept>
 
@@ -63,38 +66,56 @@ void VideoWidget::present(QImage image, QString name, QString status, bool speak
 void VideoWidget::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing);
-  p.fillRect(rect(), QColor("#222833"));
+  const QRectF box = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+  QPainterPath rounded;
+  rounded.addRoundedRect(box, 8, 8);
+  p.setClipPath(rounded);
+  p.fillRect(rect(), QColor("#101114"));
   if (!image_.isNull()) {
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     p.drawImage(fit_video(rect(), image_.size()), image_);
   } else {
-    int diameter = std::clamp(height() - 78, 24, 64);
-    QRect avatar(0, 0, diameter, diameter);
-    avatar.moveCenter(QPoint(width() / 2, (height() - 30) / 2 - 10));
+    const int diameter = std::clamp(std::min(width(), height()) / 3, 32, 72);
+    QRectF avatar(0, 0, diameter, diameter);
+    avatar.moveCenter(QPointF(width() / 2.0, (height() - 30) / 2.0));
+    QLinearGradient fill(avatar.topLeft(), avatar.bottomRight());
+    fill.setColorAt(0, QColor("#4b96ff"));
+    fill.setColorAt(1, QColor("#0060d8"));
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor("#315b97"));
+    p.setBrush(fill);
     p.drawEllipse(avatar);
-    p.setPen(Qt::white);
     QFont font = p.font();
-    font.setPixelSize(diameter > 40 ? 27 : 18);
+    font.setPixelSize(std::max(14, int(diameter * 0.42)));
     p.setFont(font);
-    p.drawText(avatar, Qt::AlignCenter, name_.left(1));
-    font.setPixelSize(12);
-    p.setFont(font);
-    p.setPen(QColor("#c6cfdd"));
-    p.drawText(QRect(4, avatar.bottom() + 6, width() - 8, 18), Qt::AlignCenter, status_);
+    p.setPen(Qt::white);
+    p.drawText(avatar, Qt::AlignCenter, name_.isEmpty() ? QString("?") : name_.left(1));
+    if (!status_.isEmpty()) {
+      font.setPixelSize(11);
+      p.setFont(font);
+      p.setPen(QColor("#8e949f"));
+      p.drawText(QRectF(4, avatar.bottom() + 8, width() - 8, 18), Qt::AlignCenter, status_);
+    }
   }
-  p.fillRect(0, height() - 30, width(), 30, QColor(15, 19, 26, 210));
-  p.setPen(Qt::white);
-  auto f = p.font();
-  f.setPixelSize(12);
-  p.setFont(f);
-  p.drawText(QRect(10, height() - 30, width() - 20, 30), Qt::AlignVCenter,
-             p.fontMetrics().elidedText(name_, Qt::ElideRight, width() - 20));
+  QFont font = p.font();
+  font.setPixelSize(12);
+  p.setFont(font);
+  const QString label = p.fontMetrics().elidedText(name_, Qt::ElideRight, width() - 56);
+  const int badgeWidth =
+      std::min(width() - 16, p.fontMetrics().horizontalAdvance(label) + 42);
+  const QRectF badge(8, height() - 32, badgeWidth, 24);
+  p.setPen(Qt::NoPen);
+  p.setBrush(QColor(6, 8, 12, 190));
+  p.drawRoundedRect(badge, 6, 6);
+  p.setPen(QColor("#f2f4f8"));
+  p.drawText(QRectF(badge.left() + 8, badge.top(), badge.width() - 26, badge.height()),
+             Qt::AlignVCenter, label);
+  ui::draw_glyph(p, ui::Glyph::MicOff,
+                 QRectF(badge.right() - 20, badge.top() + 4, 16, 16), QColor("#aab0bb"));
+  p.setClipping(false);
   if (speaker_) {
-    p.setPen(QPen(QColor("#5bb5ff"), 2));
+    p.setPen(QPen(QColor("#006eff"), 2));
     p.setBrush(Qt::NoBrush);
-    p.drawRect(rect().adjusted(1, 1, -1, -1));
+    p.drawRoundedRect(box.adjusted(1, 1, -1, -1), 8, 8);
   }
 }
 
