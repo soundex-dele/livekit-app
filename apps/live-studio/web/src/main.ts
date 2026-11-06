@@ -1,8 +1,10 @@
 import {Room,RoomEvent,Track,createLocalTracks, type LocalTrack} from 'livekit-client';
 import {acceptEvents,pkLabel,stateLabel,type User,type LiveRoom,type Snapshot,type LiveEvent} from './state';
 import './style.css';
+import {api, control, watch, roomView, eventView, resourceCredential, clearVisitors} from './api';
+import {mountAccountPanel, type ResourceEvent} from '../../../../packages/web/control';
 
-const prefix='/api/v1/live-studio/';
+
 const app=document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML=`<header><a class="brand" href="#"><span class="brand-icon">AV</span>直播空间</a><nav><a href="#">发现直播</a><button id="account">登录 / 注册</button><button id="admin" hidden>管理</button><button id="logout" hidden>退出</button></nav></header>
 <div id="notice" role="status" aria-live="polite"></div><main>
@@ -20,7 +22,6 @@ let joining=false;
 const messages=$('messages');
 const errors:Record<string,string>={unauthorized:'请先登录，或重新登录后再试。',invalid_account:'用户名或密码不符合要求。',account_unavailable:'用户名已被使用。',insufficient_points:'今天的免费积分不足。',cannot_gift_self:'不能给自己送礼。',muted:'你已被主播禁言。',banned:'本次直播的观看权限已被移除。',broadcast_not_live:'直播尚未开始，请稍后再试。',broadcast_ended:'直播已结束。',rate_limited:'操作太频繁，请稍后再试。',media_unavailable:'媒体服务暂时不可用。',viewer_capacity:'直播间已满，请稍后再试。',guest_capacity:'连麦席位已满。',pk_active:'PK 期间暂不开放嘉宾连麦。'};
 function notify(text:string){$('notice').textContent=text;}
-async function api<T=unknown>(path:string,body?:unknown):Promise<T>{const response=await fetch(path.startsWith('/api/')?path:prefix+path,{method:body===undefined?'GET':'POST',credentials:'same-origin',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const value=await response.json();if(!response.ok)throw new Error(errors[value.error]??value.error??`请求失败 (${response.status})`);return value as T;}
 async function guarded(action:()=>Promise<void>){try{await action();}catch(e){notify(e instanceof Error?e.message:String(e));}}
 function button(label:string,action:()=>Promise<void>,disabled=false){const b=document.createElement('button');b.textContent=label;b.disabled=disabled;b.onclick=()=>{b.disabled=true;void guarded(action).finally(()=>{b.disabled=disabled;});};return b;}
 function row(text:string){const div=document.createElement('div');div.className='entry';const span=document.createElement('span');span.textContent=text;div.append(span);return div;}
@@ -31,23 +32,73 @@ async function stopStage(){const old=stage;stage=null;for(const track of localTr
 async function leave(){generation++;clearTimeout(reconnectTimer);socket?.close();socket=null;await stopStage();await program?.disconnect();program=null;current=null;snapshot=null;$('video-stage').querySelectorAll('audio,video').forEach(el=>el.remove());$('empty-video').hidden=false;}
 function attach(room:Room,target:HTMLElement){room.on(RoomEvent.TrackSubscribed,(track)=>{const element=track.attach();element.dataset.track=track.sid??'';element.autoplay=true;if(element instanceof HTMLVideoElement){element.playsInline=true;if(target.id==='video-stage')$('empty-video').hidden=true;}target.append(element);void element.play().catch(()=>notify('点击“开启声音”播放直播。'));});room.on(RoomEvent.TrackUnsubscribed,track=>track.detach().forEach(el=>el.remove()));}
 async function connectProgram(turn:number){if(!current)return;const id=current.broadcast;const c=await api<{media_url:string;media_token:string}>(`broadcasts/${id}/connect`,{});if(turn!==generation)return;const room=new Room({adaptiveStream:true,dynacast:true});program=room;attach(room,$('video-stage'));room.on(RoomEvent.Disconnected,()=>{if(turn!==generation||snapshot?.broadcast.state==='ended')return;notify('连接中断，正在重新连接…');reconnectTimer=setTimeout(()=>void guarded(async()=>{await connectProgram(turn);}),2000);});await room.connect(c.media_url,c.media_token);if(turn!==generation){await room.disconnect();return;}notify('');}
-function eventStream(turn:number){if(!current)return;const url=new URL(prefix+`broadcasts/${current.broadcast}/events`,location.origin);url.protocol=location.protocol==='https:'?'wss:':'ws:';url.searchParams.set('after',String(lastEvent));socket=new WebSocket(url);socket.onopen=()=>{$('chat-state').textContent='已连接';};socket.onmessage=(message)=>{try{const batch=acceptEvents(lastEvent,JSON.parse(message.data) as LiveEvent[]);lastEvent=batch.last;for(const event of batch.events){const p=event.payload;if(event.kind==='chat'||event.kind==='gift'){const line=document.createElement('div');line.className=event.kind==='gift'?'gift-message':'chat-message';const name=document.createElement('strong');name.textContent=String(p.name??'');const text=document.createElement('span');text.textContent=event.kind==='gift'?`送出 ${p.points} 分礼物`:String(p.text??'');line.append(name,text);messages.append(line);while(messages.children.length>200)messages.firstElementChild?.remove();messages.scrollTop=messages.scrollHeight;}if(event.kind==='kick'&&p.identity===`u-${user?.id}`){notify('你已被移出直播间。');void leave();return;}}void refreshSnapshot();}catch{notify('直播事件格式错误，请刷新直播间。');}};socket.onclose=()=>{if(turn!==generation||snapshot?.broadcast.state==='ended')return;$('chat-state').textContent='重连中';setTimeout(()=>{if(turn===generation)eventStream(turn);},1500);};}
-async function join(room:LiveRoom){await leave();current=room;const turn=generation;$('title').textContent=room.title;messages.replaceChildren();lastEvent=0;if(!room.broadcast){$('status').textContent='未开播';return;}snapshot=await api<Snapshot>(`broadcasts/${room.broadcast}/snapshot`);if(turn!==generation)return;renderSnapshot();eventStream(turn);await connectProgram(turn);await loadWallet();}
+async function eventStream(turn:number) {
+  if(!current)return;
+  try {
+    const next=await control.eventSocket(current.broadcast,resourceCredential(current.broadcast),lastEvent);
+    if(turn!==generation){next.close();return;}
+    socket=next;
+    next.onopen=()=>{$('chat-state').textContent='已连接';};
+    next.onmessage=(message)=>{
+      if(turn!==generation)return;
+      try {
+        const value=JSON.parse(message.data);
+        const incoming:ResourceEvent[]=Array.isArray(value)?value:value.items??[value];
+        const batch=acceptEvents(lastEvent,incoming.filter(event=>typeof event.sequence==='number').map(eventView));
+        lastEvent=batch.last;
+        for(const event of batch.events){
+          const p=event.payload;
+          if(event.kind==='chat'||event.kind==='gift'){
+            const line=document.createElement('div');line.className=event.kind==='gift'?'gift-message':'chat-message';
+            const name=document.createElement('strong');name.textContent=String(p.name??'');
+            const text=document.createElement('span');text.textContent=event.kind==='gift'?`送出 ${p.points} 分礼物`:String(p.text??'');
+            line.append(name,text);messages.append(line);while(messages.children.length>200)messages.firstElementChild?.remove();
+            messages.scrollTop=messages.scrollHeight;
+          }
+          if(event.kind==='kick'&&p.identity===user?.id){notify('你已被移出直播间');void leave();return;}
+        }
+        void refreshSnapshot();
+      } catch {notify('事件数据无法解析，正在等待重新同步。');}
+    };
+    next.onclose=()=>{
+      if(turn!==generation||snapshot?.broadcast.state==='ended')return;
+      $('chat-state').textContent='重连中';setTimeout(()=>{if(turn===generation)void eventStream(turn);},1500);
+    };
+  } catch(error) {
+    if(turn===generation){notify(error instanceof Error?error.message:'事件连接失败');setTimeout(()=>{if(turn===generation)void eventStream(turn);},1500);}
+  }
+}
+async function join(room:LiveRoom){await leave();current=room;const turn=generation;$('title').textContent=room.title;messages.replaceChildren();lastEvent=0;if(!room.broadcast){$('status').textContent='未开播';return;}await watch(room.broadcast);snapshot=await api<Snapshot>(`broadcasts/${room.broadcast}/snapshot`);if(turn!==generation)return;renderSnapshot();void eventStream(turn);await connectProgram(turn);await loadWallet();}
 async function loadWallet(){if(!user){$('wallet').textContent='登录后每天获得 100 免费积分';return;}const wallet=await api<{remaining:number}>('wallet');$('wallet').textContent=`今日剩余 ${wallet.remaining} 免费积分 · 每日重置，不累计`;}
 async function refreshSnapshot(){if(refreshing||!current?.broadcast)return;refreshing=true;const turn=generation;try{const s=await api<Snapshot>(`broadcasts/${current.broadcast}/heartbeat`,{connected:true});if(turn!==generation)return;snapshot=s;renderSnapshot();if(s.broadcast.state==='ended'){socket?.close();await stopStage();await program?.disconnect();return;}const guest=s.guests.find(g=>g.user_id===user?.id);if(guest?.state==='approved'&&!stage&&!stageConnecting){$('guest-status').textContent='已批准，请点击进入连麦';if(!$('guest-join')){const b=button('进入连麦',joinStage);b.id='guest-join';$('guest-panel').prepend(b);}}if(guest?.state!=='approved'){document.getElementById('guest-join')?.remove();if(stage)await stopStage();}}catch(e){notify(e instanceof Error?e.message:String(e));}finally{refreshing=false;}}
 function renderSnapshot(){if(!snapshot||!current)return;const s=snapshot;$('status').textContent=stateLabel[s.broadcast.state]??s.broadcast.state;$('online').textContent=`${s.online} 人在线`;$('pk').textContent=pkLabel(s.pk);$('board').replaceChildren(...s.leaderboard.map(x=>{const li=document.createElement('li');li.textContent=`${x.name} · ${x.points} 分`;return li;}));const own=user?.id===s.broadcast.owner;$('host-controls').hidden=!own&&!user?.admin;$('request-guest').hidden=own;const guest=s.guests.find(g=>g.user_id===user?.id);if(guest?.state==='pending')$('guest-status').textContent='已申请，等待主播批准';if(guest?.state==='rejected')$('guest-status').textContent='主播暂未接受申请';if(own||user?.admin){$('guests').replaceChildren(...s.guests.filter(g=>g.state==='pending'||g.state==='approved').map(g=>{const r=row(g.name);if(g.state==='pending'){r.append(button('同意',async()=>command('guest/approve',{target:g.user_id})),button('拒绝',async()=>command('guest/reject',{target:g.user_id})));}else r.append(button('下麦',async()=>command('guest/end',{target:g.user_id})));return r;}));$('members').replaceChildren(...s.viewers.filter(v=>v.user_id!==s.broadcast.owner).map(v=>{const r=row(v.name);r.append(button(v.muted?'解除禁言':'禁言',async()=>command('mute',{target:v.identity,enabled:!v.muted})),button('移出',async()=>command('kick',{target:v.identity})));return r;}));}}
 async function command(action:string,value:unknown={}){if(!current?.broadcast)throw new Error('当前没有直播');await api(`broadcasts/${current.broadcast}/${action}`,value);await refreshSnapshot();}
 async function joinStage(){if(!current||!user||stageConnecting)return;stageConnecting=true;const turn=generation;try{const credentials=await api<{media_url:string;media_token:string}>(`broadcasts/${current.broadcast}/connect`,{stage:true});const tracks=await createLocalTracks({audio:{echoCancellation:true,noiseSuppression:true},video:{resolution:{width:640,height:360,frameRate:30}}});if(turn!==generation){tracks.forEach(t=>t.stop());return;}localTracks=tracks;const room=new Room();stage=room;attach(room,$('guest-media'));await room.connect(credentials.media_url,credentials.media_token);for(const track of tracks){await room.localParticipant.publishTrack(track);if(track.kind===Track.Kind.Video){const preview=track.attach();preview.muted=true;$('guest-media').append(preview);}}for(const element of $('video-stage').querySelectorAll<HTMLMediaElement>('audio,video'))element.muted=true;$('leave-guest').hidden=false;$('guest-status').textContent='连麦中';document.getElementById('guest-join')?.remove();}catch(e){await stopStage();throw e;}finally{stageConnecting=false;}}
-async function management(){const users=await api<User[]>('admin/users');$('users').replaceChildren(...users.map(u=>{const r=row(`${u.name}${u.admin?' · 管理员':''}`);r.append(button(u.disabled?'启用':'禁用',async()=>{await api('admin/disable',{user:u.id,disabled:!u.disabled});await management();},u.id===user?.id));const password=document.createElement('input');password.type='password';password.placeholder='新密码（至少 10 位）';password.setAttribute('aria-label',`重置 ${u.name} 的密码`);r.append(password,button('重置密码',async()=>{await api('admin/reset-password',{user:u.id,password:password.value});password.value='';notify('密码已重置，旧会话已撤销。');},u.id===user?.id));return r;}));await loadRooms();$('admin-rooms').replaceChildren(...rooms.filter(r=>r.broadcast).map(r=>{const el=row(r.title);el.append(button('强制关播',async()=>{await api(`broadcasts/${r.broadcast}/stop`,{});await management();}));return el;}));}
-async function route(){if(joining)return;joining=true;try{const hash=location.hash;const admin=hash==='#admin';const roomId=hash.startsWith('#room/')?hash.slice(6):'';$('lobby').hidden=!!roomId||admin;$('theater').hidden=!roomId;$('management').hidden=!admin;if(admin){await leave();if(!user?.admin)throw new Error('需要管理员账号');await management();}else if(roomId){await loadRooms();const room=rooms.find(r=>r.id===roomId);if(!room)throw new Error('直播间不存在');await join(room);}else{await leave();await loadRooms();}}finally{joining=false;}}
+async function management(){
+  const users=await api<User[]>('admin/users');
+  $('users').replaceChildren(...users.map(u=>{
+    const r=row(`${u.name}${u.admin?' · 管理员':''}`);
+    r.append(button(u.disabled?'启用':'禁用',async()=>{await api('admin/disable',{user:u.id,disabled:!u.disabled});await management();},u.id===user?.id));
+    const reset=document.createElement('input');reset.readOnly=true;reset.hidden=true;reset.setAttribute('aria-label',`${u.name} 的一次性密码重置令牌`);
+    r.append(reset,button('生成密码重置令牌',async()=>{
+      const result=await api<{token:string}>(`/api/v1/users/${encodeURIComponent(u.id)}/password-reset`,{});
+      reset.value=result.token;reset.hidden=false;notify('重置令牌 15 分钟内有效，请通过可信渠道交给该用户。');
+    },u.id===user?.id));return r;
+  }));
+  await loadRooms();$('admin-rooms').replaceChildren(...rooms.filter(r=>r.broadcast).map(r=>{
+    const el=row(r.title);el.append(button('强制关播',async()=>{await api(`broadcasts/${r.broadcast}/stop`,{});await management();}));return el;
+  }));
+}
+async function route(){if(joining)return;joining=true;try{const hash=location.hash;const admin=hash==='#admin';const roomId=hash.startsWith('#room/')?hash.slice(6):'';$('lobby').hidden=!!roomId||admin;$('theater').hidden=!roomId;$('management').hidden=!admin;if(admin){await leave();if(!user?.admin)throw new Error('需要管理员账号');await management();}else if(roomId){const room=roomView(await control.request('live-studio/rooms/'+encodeURIComponent(roomId)));await join(room);}else{await leave();await loadRooms();}}finally{joining=false;}}
 $('account').onclick=()=>{if(user){notify(`已登录为 ${user.name}。密码修改可在 Windows 直播伴侣账号设置中完成。`);return;}$<HTMLDialogElement>('auth-dialog').showModal();};$('close-auth').onclick=()=>$<HTMLDialogElement>('auth-dialog').close();
 $('toggle-auth').onclick=()=>{registered=!registered;$('auth-title').textContent=registered?'加入直播空间':'欢迎回来';$('submit-auth').textContent=registered?'注册并登录':'登录';$('toggle-auth').textContent=registered?'已有账号？登录':'没有账号？注册';$<HTMLInputElement>('password').autocomplete=registered?'new-password':'current-password';};
-$<HTMLFormElement>('auth-form').onsubmit=e=>{e.preventDefault();$('auth-error').textContent='';$<HTMLButtonElement>('submit-auth').disabled=true;void(async()=>{try{const result=await api<{user:User}>(`/api/v1/auth/${registered?'register':'login'}`,{name:$<HTMLInputElement>('username').value,password:$<HTMLInputElement>('password').value});user=result.user;$<HTMLInputElement>('password').value='';syncAccount();$<HTMLDialogElement>('auth-dialog').close();await route();}catch(e){$('auth-error').textContent=e instanceof Error?e.message:String(e);}finally{$<HTMLButtonElement>('submit-auth').disabled=false;}})();};
-$('logout').onclick=()=>void guarded(async()=>{await api('/api/v1/auth/logout',{});user=null;syncAccount();await route();});$('admin').onclick=()=>{location.hash='admin';};$('refresh').onclick=()=>void guarded(loadRooms);
+$<HTMLFormElement>('auth-form').onsubmit=e=>{e.preventDefault();$('auth-error').textContent='';$<HTMLButtonElement>('submit-auth').disabled=true;void(async()=>{try{const result=await api<{user:User}>(`/api/v1/auth/${registered?'register':'login'}`,{name:$<HTMLInputElement>('username').value,password:$<HTMLInputElement>('password').value});user=result.user;clearVisitors();control.resetAccount();await control.selectDefaultOrganization();$<HTMLInputElement>('password').value='';syncAccount();$<HTMLDialogElement>('auth-dialog').close();await route();}catch(e){$('auth-error').textContent=e instanceof Error?e.message:String(e);}finally{$<HTMLButtonElement>('submit-auth').disabled=false;}})();};
+$('logout').onclick=()=>void guarded(async()=>{await api('/api/v1/auth/logout',{});user=null;clearVisitors();control.resetAccount();syncAccount();await route();});$('admin').onclick=()=>{location.hash='admin';};$('refresh').onclick=()=>void guarded(loadRooms);
 $('sound').onclick=()=>void guarded(async()=>{await program?.startAudio();await stage?.startAudio();for(const element of $('video-stage').querySelectorAll<HTMLMediaElement>('video,audio')){element.muted=!!stage;await element.play();}$('sound').textContent='声音已开启';});
 $('share').onclick=()=>void guarded(async()=>{await navigator.clipboard.writeText(location.href);notify('直播间链接已复制。');});
 $<HTMLFormElement>('chat-form').onsubmit=e=>{e.preventDefault();if(!authenticate())return;const input=$<HTMLInputElement>('message');const text=input.value.trim();if(text)void guarded(async()=>{await command('chat',{text});input.value='';});};
 document.querySelectorAll<HTMLButtonElement>('[data-gift]').forEach(b=>b.onclick=()=>{if(!authenticate())return;b.disabled=true;void guarded(async()=>{await command('gift',{points:Number(b.dataset.gift),request_id:crypto.randomUUID()});await loadWallet();}).finally(()=>{b.disabled=false;});});
 $('request-guest').onclick=()=>{if(authenticate())void guarded(async()=>command('guest/request'));};$('leave-guest').onclick=()=>void guarded(async()=>{await command('guest/end',{target:user?.id});await stopStage();});
 window.addEventListener('hashchange',()=>void guarded(route));setInterval(()=>{if(current?.broadcast)void refreshSnapshot();if(snapshot?.pk)$('pk').textContent=pkLabel(snapshot.pk);},3000);
-void guarded(async()=>{try{user=await api<User>('/api/v1/auth/me');}catch{user=null;}syncAccount();await route();});
+
+mountAccountPanel(document.querySelector('header')!,()=>{clearVisitors();void guarded(async()=>{user=await api<User>('/api/v1/auth/me').catch(()=>null);syncAccount();await route();});});

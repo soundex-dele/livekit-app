@@ -43,7 +43,8 @@ Snapshot Session::snapshot() const {
   return snapshot_;
 }
 
-void Session::start(std::string url) {
+void Session::start(std::string url, std::string account, std::string password,
+                    std::string organization) {
   if (failure_) {
     return;
   }
@@ -63,7 +64,11 @@ void Session::start(std::string url) {
     snapshot_.state = "creating";
     snapshot_.finished = false;
   }
-  worker_ = std::thread([this, url = std::move(url)] { run(url); });
+  organization_ = std::move(organization);
+  worker_ = std::thread([this, url = std::move(url), account = std::move(account),
+                         password = std::move(password)]() mutable {
+    run(url, std::move(account), std::move(password));
+  });
 }
 
 void Session::approve() {
@@ -85,71 +90,151 @@ void Session::update(const sdk::Json& v, sdk::ControlClock::time_point started) 
   std::lock_guard lock(mutex_);
   snapshot_.state = v.at("state");
   snapshot_.name = v.at("controller_name");
-  snapshot_.id = v.at("id");
   snapshot_.expires = v.value("expires_at", "");
   grant_ = {v.at("grant_id"), v.at("controller_identity"), v.at("epoch"),
             started + std::chrono::milliseconds(v.at("lease_remaining_ms").get<int64_t>())};
 }
 
-void Session::run(std::string url) {
-  std::string id, credential;
+void Session::run(std::string url, std::string account, std::string password) {
+  std::string id;
   bool started_media = false;
-  try {
-    sdk::Json empty = sdk::Json::object();
-    auto began = sdk::ControlClock::now();
-    auto v = request(url, "/api/v1/remote-control/pairings", "", &empty);
-    id = v.at("id");
-    credential = v.at("credential");
-    update(v, began);
+  const auto work = [&]() -> sdk::Result<void> {
+    auto empty = sdk::Json::object();
+    sdk::Json login{{"name", account}, {"password", password}};
+    auto auth = av::request_result(url, "/api/v1/auth/login", "", &login);
+    std::fill(password.begin(), password.end(), '\0');
+    login.clear();
+    if (!auth) {
+      return sdk::Result<void>::failure(auth.failure_record());
+    }
+    account_token_ = auth->value("session_token", std::string{});
+    auto org = av::select_organization(url, account_token_, organization_);
+    if (!org) {
+      return sdk::Result<void>::failure(org.failure_record());
+    }
+    organization_ = *org;
+    const av::RequestOptions options{organization_, ""};
+    auto created = av::request_result(url, "/api/v1/av/remote-control/sessions", account_token_,
+                                      &empty, options);
+    if (!created) {
+      return sdk::Result<void>::failure(created.failure_record());
+    }
+    id = created->value("id", std::string{});
     {
       std::lock_guard lock(mutex_);
-      snapshot_.code = v.at("pairing_code");
+      snapshot_.id = id;
+      snapshot_.code = created->value("pairing_code", std::string{});
+      snapshot_.state = "waiting";
     }
     auto next = sdk::ControlClock::now();
+    auto next_presence = next;
+    sdk::Json current;
     while (!stop_) {
-      auto now = sdk::ControlClock::now();
-      int action = action_.exchange(0);
+      const auto now = sdk::ControlClock::now();
+      const int action = action_.exchange(0);
+      if (now >= next_presence) {
+        auto beat =
+            av::request_result(url, "/api/v1/av/remote-control/sessions/" + id + "/heartbeat",
+                               account_token_, &empty, options);
+        if (!beat && snapshot().state != "approved") {
+          return sdk::Result<void>::failure(beat.failure_record());
+        }
+        next_presence = now + 3s;
+      }
       if (action || now >= next) {
-        std::string route = "/api/v1/remote-control/control-grants/" + id;
-        const auto state = snapshot().state;
-        if (action == 1 && !fixture_ && !sdk::control_permissions().ready())
-          throw std::runtime_error("屏幕或辅助功能权限不足，请检查系统设置");
-        if (action)
-          route += action == 1 ? "/approve" : "/reject";
-        else if (state == "approved")
-          route += "/renew";
         auto request_started = sdk::ControlClock::now();
-        v = request(url, route, credential, (action || state == "approved") ? &empty : nullptr);
-        update(v, request_started);
-        if (stop_)
-          break;
-        if (v.at("state") == "approved") {
-          if (!started_media) {
-            started_media = true;
-            rtc_ = std::thread([this, url, id, credential] { media(url, id, credential); });
+        sdk::Result<sdk::Json> response = av::request_result(
+            url, "/api/v1/av/remote-control/sessions/" + id, account_token_, nullptr, options);
+        if (!response) {
+          // Transient API failures can retry only inside the existing local lease.
+          std::lock_guard lock(mutex_);
+          if (snapshot_.state == "approved" && request_started < grant_.deadline &&
+              response.error().message.find("status 4") == std::string::npos) {
+            next = request_started + 250ms;
+            continue;
           }
-        } else if (v.at("state") != "pending" && v.at("state") != "waiting")
-          break;
-        next = sdk::ControlClock::now() + (v.at("state") == "approved" ? 3s : 1s);
+          return sdk::Result<void>::failure(response.failure_record());
+        }
+        if (response->contains("control_grant")) {
+          current = (*response)["control_grant"];
+        }
+        if (current.is_object()) {
+          auto normalized = grant_view(current);
+          const auto state = normalized.value("state", std::string{});
+          const auto grant_id = normalized.value("id", std::string{});
+          if (action || state == "approved") {
+            if (action == 1 && !fixture_ && !sdk::control_permissions().ready()) {
+              return sdk::Result<void>::failure(
+                  sdk::make_failure(sdk::ErrorDomain::lifecycle, sdk::ErrorCode::request_failed,
+                                    "请先授予屏幕录制和辅助功能权限"));
+            }
+            sdk::Json command{{"epoch", current.value("epoch", int64_t(0))}};
+            if (action == 1) {
+              command["local_consent"] = true;
+            }
+            const std::string verb = action == 1 ? "approve" : action == 2 ? "reject" : "renew";
+            request_started = sdk::ControlClock::now();
+            auto renewed =
+                av::request_result(url, "/api/v1/av/control-grants/" + grant_id + "/" + verb,
+                                   account_token_, &command, options);
+            if (!renewed) {
+              std::lock_guard lock(mutex_);
+              if (verb == "renew" && request_started < grant_.deadline &&
+                  renewed.error().message.find("status 4") == std::string::npos) {
+                next = request_started + 250ms;
+                continue;
+              }
+              return sdk::Result<void>::failure(renewed.failure_record());
+            }
+            if (verb == "renew") {
+              normalized = grant_view(current);
+              normalized["lease_remaining_ms"] = renewed->value("lease_remaining_ms", int64_t(0));
+            } else {
+              normalized = grant_view(*renewed);
+            }
+            if (normalized.value("state", std::string{}) == "approved") {
+              update(normalized, request_started);
+            }
+          }
+          {
+            std::lock_guard lock(mutex_);
+            snapshot_.state = normalized.value("state", std::string{});
+            snapshot_.name = normalized.value("controller_name", std::string{});
+          }
+          if (snapshot().state == "approved" && !started_media) {
+            started_media = true;
+            rtc_ = std::thread([this, url, id] { media(url, id, account_token_); });
+          } else if (snapshot().state != "approved" && snapshot().state != "pending") {
+            break;
+          }
+        }
+        next = sdk::ControlClock::now() + (snapshot().state == "approved" ? 3s : 1s);
       }
       std::this_thread::sleep_for(20ms);
     }
-  } catch (const std::exception& e) {
+    return sdk::Result<void>::success();
+  };
+  const auto outcome = work();
+  if (!outcome && !stop_) {
     std::lock_guard lock(mutex_);
-    snapshot_.error = e.what();
+    snapshot_.error = outcome.error().message;
   }
   stop();
-  if (rtc_.joinable())
+  if (rtc_.joinable()) {
     rtc_.join();
-  if (!id.empty())
-    try {
-      sdk::Json empty = sdk::Json::object();
-      request(url, "/api/v1/remote-control/control-grants/" + id + "/revoke", credential, &empty);
-    } catch (const std::exception& e) {
+  }
+  if (!id.empty()) {
+    auto empty = sdk::Json::object();
+    const auto ended = av::request_result(url, "/api/v1/av/remote-control/sessions/" + id + "/stop",
+                                          account_token_, &empty, {organization_, ""});
+    if (!ended) {
       std::lock_guard lock(mutex_);
-      if (snapshot_.error.empty())
-        snapshot_.error = e.what();
+      if (snapshot_.error.empty()) {
+        snapshot_.error = ended.error().message;
+      }
     }
+  }
+  account_token_.clear();
   {
     std::lock_guard lock(mutex_);
     snapshot_.state = "ended";
@@ -176,8 +261,17 @@ void Session::media(std::string url, std::string id, std::string credential) {
   try {
     const auto run_media = [&]() -> sdk::Result<void> {
       sdk::Json empty = sdk::Json::object();
-      auto connection = request(url, "/api/v1/remote-control/control-grants/" + id + "/connect",
-                                credential, &empty);
+      auto access = av::request_result(url, "/api/v1/av/remote-control/sessions/" + id + "/connect",
+                                       credential, &empty, {organization_, ""});
+      if (!access) {
+        return sdk::Result<void>::failure(access.failure_record());
+      }
+      auto media_access = av::media_credentials(url, access->value("grant_id", std::string{}),
+                                                credential, {organization_, ""}, &stop_);
+      if (!media_access) {
+        return sdk::Result<void>::failure(media_access.failure_record());
+      }
+      auto connection = *media_access;
       if (stop_)
         return sdk::Result<void>::success();
       sdk::ControlGrant grant;

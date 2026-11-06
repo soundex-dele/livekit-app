@@ -5,10 +5,11 @@
 #include "platform.hpp"
 #include <fstream>
 #include <algorithm>
+#include <map>
 
 namespace studio_app {
 namespace {
-const std::string prefix = "/api/v1/live-studio/";
+const std::string prefix = "/api/v1/av/live-studio/";
 }
 
 Session::Session(std::filesystem::path settings, sdk::StudioOptions options, bool offline)
@@ -18,11 +19,13 @@ Session::Session(std::filesystem::path settings, sdk::StudioOptions options, boo
     if (!account.is_null()) {
       url_ = account.at("url");
       token_ = account.at("token");
+      organization_ = account.value("organization", std::string{});
     }
   } catch (const std::exception& e) {
     state_.error = e.what();
   }
   state_.server_url = url_;
+  state_.organization = organization_;
   worker_ = livekit::compat::jthread([this] { run(); });
 }
 
@@ -51,16 +54,57 @@ void Session::enqueue(std::function<void()> f) {
 }
 
 Json Session::request(const std::string& path, const Json* body) {
-  return av::request(url_, path, token_, body);
+  const av::RequestOptions options{organization_, ""};
+  auto result = av::request(url_, path, token_, body, options);
+  if (path == prefix + "rooms" && !body) {
+    auto rooms = result.value("items", Json::array());
+    for (auto& room : rooms) {
+      room["broadcast"] = room.value("broadcast_id", std::string{});
+    }
+    return rooms;
+  }
+  if (path.size() >= 10 && path.substr(path.size() - 10) == "/heartbeat") {
+    result = av::request(url_, path.substr(0, path.size() - 10), token_, nullptr, options);
+    result["broadcast"]["room"] = result.value("room_id", std::string{});
+    result["broadcast"]["owner"] = result.value("host", std::string{});
+    result["guests"] = Json::array();
+    for (const auto& peer : result.value("stage_members", Json::array())) {
+      result["guests"].push_back(
+          Json{{"user_id", peer.value("subject_id", std::string{})},
+               {"name", peer.value("name", peer.value("subject_id", std::string{}))},
+               {"state", peer.value("stage", std::string{})}});
+    }
+    result["viewers"] = Json::array();
+    for (const auto& peer : result.value("members", Json::array())) {
+      result["viewers"].push_back(
+          Json{{"user_id", peer.value("subject_id", std::string{})},
+               {"identity", peer.value("subject_id", std::string{})},
+               {"name", peer.value("name", peer.value("subject_id", std::string{}))},
+               {"muted", peer.value("muted", false)}});
+    }
+    if (result.contains("pk") && result["pk"].is_object()) {
+      auto& pk = result["pk"];
+      pk["a"] = pk.value("left_id", std::string{});
+      pk["b"] = pk.value("right_id", std::string{});
+      pk["score_a"] = pk.value("left_score", int64_t(0));
+      pk["score_b"] = pk.value("right_score", int64_t(0));
+      if (pk.value("state", std::string{}) == "pending") {
+        pk["state"] = "invited";
+      }
+    }
+  }
+  return result;
 }
 
 void Session::store_token() {
-  platform::save_account(settings_, Json{{"url", url_}, {"token", token_}});
+  platform::save_account(settings_,
+                         Json{{"url", url_}, {"token", token_}, {"organization", organization_}});
 }
 
-void Session::login(std::string url, std::string name, std::string password, bool registration) {
+void Session::login(std::string url, std::string name, std::string password, bool registration,
+                    std::string organization) {
   enqueue([this, url = std::move(url), name = std::move(name), password = std::move(password),
-           registration]() mutable {
+           registration, organization = std::move(organization)]() mutable {
     if (!broadcast_.empty())
       throw std::runtime_error("请先结束直播");
     if (!livekit::compat::starts_with(url, "https://") &&
@@ -76,10 +120,18 @@ void Session::login(std::string url, std::string name, std::string password, boo
         request(std::string("/api/v1/auth/") + (registration ? "register" : "login"), &body);
     std::fill(password.begin(), password.end(), '\0');
     token_ = result.at("session_token");
+    auto selected = av::select_organization(url_, token_, organization);
+    if (!selected) {
+      std::lock_guard lock(mutex_);
+      state_.error = selected.error().message;
+      return;
+    }
+    organization_ = *selected;
     store_token();
     {
       std::lock_guard lock(mutex_);
       state_.server_url = url_;
+      state_.organization = organization_;
       state_.user = result.at("user");
       state_.error.clear();
     }
@@ -119,7 +171,8 @@ void Session::start(std::string title) {
     if (token_.empty())
       throw std::runtime_error("请先登录");
     Json c{{"title", title}};
-    auto result = request(prefix + "start", &c);
+    auto room = request(prefix + "rooms", &c);
+    auto result = request(prefix + "rooms/" + room.value("id", std::string{}) + "/start", &c);
     broadcast_ = result.at("id");
     sequence_ = 0;
     {
@@ -134,7 +187,7 @@ void Session::start(std::string title) {
     } catch (...) {
       try {
         Json empty = Json::object();
-        request(prefix + "broadcasts/" + broadcast_ + "/stop", &empty);
+        request(prefix + "broadcasts/" + broadcast_ + "/end", &empty);
       } catch (...) {
       }
       disconnect();
@@ -148,7 +201,7 @@ void Session::stop() {
     if (broadcast_.empty())
       return;
     Json empty = Json::object();
-    request(prefix + "broadcasts/" + broadcast_ + "/stop", &empty);
+    request(prefix + "broadcasts/" + broadcast_ + "/end", &empty);
     disconnect();
   });
 }
@@ -157,7 +210,17 @@ void Session::command(std::string action, Json payload) {
   enqueue([this, action = std::move(action), payload = std::move(payload)] {
     if (broadcast_.empty())
       throw std::runtime_error("当前没有直播");
-    request(prefix + "broadcasts/" + broadcast_ + "/" + action, &payload);
+    const std::map<std::string, std::string> actions{{"guest/approve", "stage-approve"},
+                                                     {"guest/reject", "stage-reject"},
+                                                     {"guest/end", "stage-remove"},
+                                                     {"pk/invite", "pk-request"},
+                                                     {"pk/accept", "pk-accept"},
+                                                     {"pk/reject", "pk-reject"},
+                                                     {"pk/leave", "pk-end"}};
+    const auto translated = actions.find(action);
+    request(prefix + "broadcasts/" + broadcast_ + "/" +
+                (translated == actions.end() ? action : translated->second),
+            &payload);
   });
 }
 
@@ -212,7 +275,15 @@ void Session::set_audio(sdk::StudioAudioSettings a) {
 
 void Session::connect(bool interaction) {
   Json args{{"stage", interaction}};
-  auto credentials = request(prefix + "broadcasts/" + broadcast_ + "/connect", &args);
+  auto access = request(prefix + "broadcasts/" + broadcast_ + "/connect", &args);
+  auto media = av::media_credentials(url_, access.value("grant_id", std::string{}), token_,
+                                     {organization_, ""}, &closing_);
+  if (!media) {
+    std::lock_guard lock(mutex_);
+    state_.error = media.error().message;
+    return;
+  }
+  auto credentials = *media;
   sdk::client::ConnectionOptions options;
   options.url = credentials.at("media_url");
   options.token = credentials.at("media_token");
@@ -294,27 +365,47 @@ void Session::disconnect() {
 
 void Session::events_start() {
   if (events_) {
+    events_->setOnMessageCallback({});
     events_->stop();
     events_.reset();
   }
+  Json body{{"resource_id", broadcast_}};
+  auto ticket = request("/api/v1/av/realtime/tickets", &body);
   auto ws = std::make_unique<ix::WebSocket>();
   auto address = url_;
-  if (livekit::compat::starts_with(address, "https:"))
+  if (livekit::compat::starts_with(address, "https:")) {
     address.replace(0, 5, "wss");
-  else
+  } else {
     address.replace(0, 4, "ws");
-  ws->setUrl(address + prefix + "broadcasts/" + broadcast_ +
-             "/events?after=" + std::to_string(sequence_));
-  ws->setExtraHeaders({{"Authorization", "Bearer " + token_}});
-  ws->setOnMessageCallback([this](const ix::WebSocketMessagePtr& m) {
-    if (m->type == ix::WebSocketMessageType::Message) {
-      try {
-        auto value = Json::parse(m->str);
-        std::lock_guard lock(mutex_);
-        if (incoming_.size() < 64)
-          incoming_.push_back(std::move(value));
-      } catch (...) {
+  }
+  ws->setUrl(address + "/api/v1/av/realtime/ws?ticket=" + ticket.value("ticket", std::string{}) +
+             "&after=" + std::to_string(sequence_));
+  ws->disableAutomaticReconnection();
+  ws->setOnMessageCallback([this](const ix::WebSocketMessagePtr& message) {
+    if (message->type != ix::WebSocketMessageType::Message || closing_) {
+      return;
+    }
+    auto value = Json::parse(message->str, nullptr, false);
+    if (value.is_discarded()) {
+      return;
+    }
+    auto batch = value.is_array()          ? value
+                 : value.contains("items") ? value["items"]
+                                           : Json::array({value});
+    for (auto& event : batch) {
+      event["seq"] = event.value("sequence", int64_t(0));
+      auto type = event.value("type", std::string{});
+      event["kind"] = livekit::compat::starts_with(type, "live.") ? type.substr(5) : type;
+      if (event.contains("payload")) {
+        auto& payload = event["payload"];
+        payload["name"] = payload.value("name", payload.value("subject_id", std::string{}));
+        payload["text"] = payload.value("content", std::string{});
+        payload["points"] = payload.value("amount", int64_t(0));
       }
+    }
+    std::lock_guard lock(mutex_);
+    if (incoming_.size() < 64) {
+      incoming_.push_back(std::move(batch));
     }
   });
   ws->start();
@@ -345,18 +436,25 @@ void Session::update_stage() {
     close_stage();
     if (!key.empty()) {
       connect(true);
-      stage_key_ = key;
+      if (stage_) {
+        stage_key_ = key;
+      }
     }
   }
 }
 
 void Session::run() {
-  auto heartbeat = std::chrono::steady_clock::now(), refresh = heartbeat;
+  auto heartbeat = std::chrono::steady_clock::now(), refresh = heartbeat, event_retry = heartbeat;
   try {
     if (!token_.empty()) {
+      auto selected = av::select_organization(url_, token_, organization_);
+      if (selected) {
+        organization_ = *selected;
+      }
       auto u = request("/api/v1/auth/me");
       std::lock_guard lock(mutex_);
       state_.user = u;
+      state_.organization = organization_;
     }
   } catch (...) {
     token_.clear();
@@ -414,10 +512,15 @@ void Session::run() {
         }
       }
       auto now = std::chrono::steady_clock::now();
+      if (!broadcast_.empty() && now >= event_retry &&
+          (!events_ || events_->getReadyState() == ix::ReadyState::Closed)) {
+        event_retry = now + std::chrono::seconds(5);
+        events_start();
+      }
       if (!broadcast_.empty() && now >= heartbeat) {
         heartbeat = now + std::chrono::seconds(3);
         bool connected = program_ && program_->connected();
-        Json c{{"connected", connected}};
+        Json c = Json::object();
         auto live = request(prefix + "broadcasts/" + broadcast_ + "/heartbeat", &c);
         {
           std::lock_guard lock(mutex_);
@@ -453,7 +556,7 @@ void Session::run() {
   if (!broadcast_.empty()) {
     try {
       Json empty = Json::object();
-      request(prefix + "broadcasts/" + broadcast_ + "/stop", &empty);
+      request(prefix + "broadcasts/" + broadcast_ + "/end", &empty);
     } catch (...) {
     }
   }

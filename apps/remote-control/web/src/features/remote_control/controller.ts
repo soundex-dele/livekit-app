@@ -2,6 +2,7 @@ import { errorText, statusText } from '../../../../../../packages/web/locale';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { ControlQueue, point, topic, type Grant, type Layout } from './protocol';
 import { request } from '../../services/api';
+import { control } from '../../../../../../packages/web/control';
 import { TextDelivery } from './text_delivery';
 const el=<T extends HTMLElement>(id:string)=>document.getElementById(id) as T;
 const form=el<HTMLFormElement>('connect-form'),video=el<HTMLVideoElement>('screen'),viewport=el('viewport');
@@ -14,7 +15,9 @@ const delivery=new TextDelivery((outcome,message)=>{
   if(outcome==='unknown'){void end(message);return;}
   updateTextControls();
 });
-let generation=0,credential='',grant:Grant|undefined,room:Room|undefined,queue:ControlQueue|undefined,layout:Layout|undefined;
+let generation=0,credential='',resource='',grant:Grant|undefined,room:Room|undefined,queue:ControlQueue|undefined,layout:Layout|undefined;
+let nextPresence=0;
+function grantView(value:any):Grant{return {...value,id:value.id,grant_id:value.id,state:value.state==='active'?'approved':value.state,lease_remaining_ms:value.lease_remaining_ms??10000};}
 let connecting=false,enabled=false,stopping=false,heartbeat:ReturnType<typeof setInterval>|undefined,poll:ReturnType<typeof setTimeout>|undefined;
 const status=(text:string)=>{el('status').textContent=text;};
 const api=(path:string,body?:unknown,token=credential)=>request(path,body,token);
@@ -44,15 +47,17 @@ async function end(message:string){
   if(delivery.cancel())textStatus.textContent='连接已结束，文字发送结果不确定。请检查远端内容，不要直接重发。';
   else textStatus.textContent=message;
   textTarget=false;draft.value='';
-  const current=room,previous=grant,secret=credential,finishing=queue?.finish();queue=undefined;room=undefined;grant=undefined;credential='';layout=undefined;connecting=false;
+  const current=room,previous=grant,previousResource=resource,secret=credential,finishing=queue?.finish();queue=undefined;room=undefined;grant=undefined;credential='';resource='';layout=undefined;connecting=false;
   stop.disabled=true;status(message);el('badge').textContent='已结束';el('placeholder').style.display='grid';video.srcObject=null;
   updateTextControls();
-  await Promise.allSettled([Promise.resolve(finishing).then(()=>current?.disconnect()),previous?api('control-grants/'+previous.id+'/revoke',{},secret):Promise.resolve()]);
+  await Promise.allSettled([Promise.resolve(finishing).then(()=>current?.disconnect()),previousResource?api('sessions/'+previousResource+'/stop',{},secret):previous?control.request('control-grants/'+previous.id+'/revoke',{epoch:previous.epoch},{credential:secret}):Promise.resolve()]);
   button.disabled=false;stopping=false;
 }
 function send(event:Record<string,unknown>){if(enabled&&layout)queue?.push({...event,layout_version:layout.layout_version});}
 async function connectMedia(g:Grant,gen:number){
-  connecting=true;const media=await api('control-grants/'+g.id+'/connect',{});if(gen!==generation)return;
+  connecting=true;const access=await api('sessions/'+resource+'/connect',{epoch:g.epoch});
+  const media=await control.credentials(access.grant_id,{credential});if(gen!==generation)return;
+  if(!g.host_identity||!g.controller_identity)throw new Error('远控参与者身份尚未就绪，请重新申请。');
   const current=room=new Room({adaptiveStream:false,dynacast:false,reconnectPolicy:{nextRetryDelayInMs:()=>null}});
   const startControlChannel=()=>{
     if(gen!==generation||room!==current||queue)return;
@@ -90,15 +95,20 @@ async function connectMedia(g:Grant,gen:number){
 }
 async function watch(gen:number){
   if(gen!==generation||!grant)return;
-  try{const value=await api('control-grants/'+grant.id) as Grant;if(gen!==generation)return;grant=value;
+  try{if(Date.now()>=nextPresence){await api('sessions/'+resource+'/heartbeat',{});nextPresence=Date.now()+3000;}
+    const snapshot=await api('sessions/'+resource);if(gen!==generation)return;
+    if(!snapshot.control_grant){await end('远控请求已失效，请重新申请。');return;}
+    const value=grantView(snapshot.control_grant);grant=value;
     if(value.state==='approved'&&!connecting)await connectMedia(value,gen);
     else if(value.state!=='pending'&&value.state!=='approved'){await end('连接申请已结束：'+statusText(value.state));return;}
     if(gen===generation)poll=setTimeout(()=>void watch(gen),500);
   }catch(e){if(gen===generation)await end('连接失败：'+errorText(e));}
 }
 form.addEventListener('submit',event=>{event.preventDefault();if(button.disabled)return;button.disabled=true;const gen=++generation;
-  void(async()=>{try{const value=await api('pairings/redeem',{code:el<HTMLInputElement>('code').value.trim(),name:el<HTMLInputElement>('name').value.trim()},'');
-    if(gen!==generation)return;grant=value;credential=value.credential;stop.disabled=false;status('等待被控端确认。对方同意前不会共享画面。');el('badge').textContent='等待确认';void watch(gen);
+  void(async()=>{try{const paired=await api('redeem',{code:el<HTMLInputElement>('code').value.trim(),name:el<HTMLInputElement>('name').value.trim()},'');
+    if(gen!==generation)return;resource=paired.resource_id;credential=paired.credential;
+    const value=await api('sessions/'+resource+'/request',{});if(gen!==generation)return;
+    grant=grantView(value);nextPresence=0;stop.disabled=false;status('等待被控端确认。对方同意前不会共享画面。');el('badge').textContent='等待确认';void watch(gen);
   }catch(e){button.disabled=false;status('申请失败：'+errorText(e));}})();
 });
 stop.onclick=()=>void end('你已停止连接。');
@@ -112,5 +122,5 @@ viewport.addEventListener('wheel',event=>{if(!enabled)return;const p=position(ev
 viewport.addEventListener('keydown',event=>{if(!enabled||event.isComposing)return;event.preventDefault();send({type:'key',code:event.code,down:true});});
 viewport.addEventListener('keyup',event=>{if(!enabled||event.isComposing)return;event.preventDefault();send({type:'key',code:event.code,down:false});});
 viewport.addEventListener('blur',release);window.addEventListener('blur',forgetTextTarget);document.addEventListener('visibilitychange',()=>{if(document.hidden)forgetTextTarget();});
-window.addEventListener('pagehide',()=>{delivery.cancel();draft.value='';release();queue?.push({type:'stop'});if(grant)void fetch('/api/v1/remote-control/control-grants/'+grant.id+'/revoke',{method:'POST',headers:{Authorization:'Bearer '+credential,'Content-Type':'application/json'},body:'{}',keepalive:true});});
+window.addEventListener('pagehide',()=>{delivery.cancel();draft.value='';release();queue?.push({type:'stop'});if(resource)void control.request('remote-control/sessions/'+resource+'/stop',{}, {credential,keepalive:true}).catch(()=>{});});
 setInterval(()=>queue?.flushMove(),34);

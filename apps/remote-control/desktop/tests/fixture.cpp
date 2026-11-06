@@ -1,6 +1,7 @@
 #include "services/session.hpp"
 #include <iostream>
 #include <fstream>
+#include <cstdlib>
 
 struct Recorder : livekit::sdk::ControlInputSink {
   std::mutex mutex;
@@ -37,7 +38,14 @@ int main(int argc, char** argv) {
     return 2;
   try {
     remote_app::Session session(true, std::make_shared<Recorder>(argv[2], argc == 3));
-    session.start(argv[1]);
+    const auto* account = std::getenv("REMOTE_FIXTURE_ACCOUNT");
+    const auto* password = std::getenv("REMOTE_FIXTURE_PASSWORD");
+    const auto* organization = std::getenv("REMOTE_FIXTURE_ORGANIZATION");
+    if (!account || !password) {
+      std::cerr << "REMOTE_FIXTURE_ACCOUNT and REMOTE_FIXTURE_PASSWORD are required\n";
+      return 2;
+    }
+    session.start(argv[1], account, password, organization ? organization : "");
     bool printed = false;
     for (int i = 0; i < 6000; i++) {
       auto state = session.snapshot();

@@ -43,7 +43,8 @@
 
 namespace av {
 livekit::sdk::Json request(const std::string& base, const std::string& path,
-                           const std::string& credential, const livekit::sdk::Json* body) {
+                           const std::string& credential, const livekit::sdk::Json* body,
+                           const RequestOptions& options) {
   @autoreleasepool {
     auto url = base + path;
     NSURL* address = [NSURL URLWithString:[NSString stringWithUTF8String:url.c_str()]];
@@ -55,7 +56,15 @@ livekit::sdk::Json request(const std::string& base, const std::string& path,
     NSMutableURLRequest* request = [NSMutableURLRequest requestWithURL:address];
     request.HTTPMethod = body ? @"POST" : @"GET";
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setValue:@"desktop" forHTTPHeaderField:@"X-AV-Client"];
+    [request setValue:@"1" forHTTPHeaderField:@"X-Foundation-Request"];
+    if (!options.organization.empty()) {
+      [request setValue:[NSString stringWithUTF8String:options.organization.c_str()]
+          forHTTPHeaderField:@"X-Organization-ID"];
+    }
+    if (!options.resource_credential.empty()) {
+      [request setValue:[NSString stringWithUTF8String:options.resource_credential.c_str()]
+          forHTTPHeaderField:@"X-AV-Resource-Credential"];
+    }
     if (!credential.empty())
       [request setValue:[NSString stringWithUTF8String:("Bearer " + credential).c_str()]
           forHTTPHeaderField:@"Authorization"];
@@ -104,7 +113,19 @@ livekit::sdk::Json request(const std::string& base, const std::string& path,
       }
       throw std::runtime_error(error);
     }
-    return livekit::sdk::Json::parse(raw);
+    auto value = livekit::sdk::Json::parse(raw);
+    if (path == "/api/v1/auth/login" || path == "/api/v1/auth/register" ||
+        path == "/api/v1/auth/refresh") {
+      auto cookies = [NSHTTPCookie
+          cookiesWithResponseHeaderFields:((NSHTTPURLResponse*)response).allHeaderFields
+                                   forURL:address];
+      for (NSHTTPCookie* cookie in cookies) {
+        if ([cookie.name isEqualToString:@"pf_session"]) {
+          value["session_token"] = std::string(cookie.value.UTF8String);
+        }
+      }
+    }
+    return value;
   }
 }
 }  // namespace av

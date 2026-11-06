@@ -14,6 +14,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QInputDialog>
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
@@ -514,7 +515,62 @@ void Window::login() {
                    accountButton_->setText("账号");
                    guard->accept();
                    message({});
-                   refreshHome();
+                   api_.request(
+                       "/api/v1/organizations", {},
+                       [this](QJsonValue list, QString error) {
+                         if (!error.isEmpty()) {
+                           message(error);
+                           return;
+                         }
+                         const auto organizations = list.toObject().value("items").toArray();
+                         if (organizations.isEmpty()) {
+                           bool accepted = false;
+                           const auto name = QInputDialog::getText(
+                               this, "创建组织", "组织名称", QLineEdit::Normal, {}, &accepted);
+                           if (!accepted || name.trimmed().isEmpty()) {
+                             message("创建会议前需要先加入或创建组织");
+                             return;
+                           }
+                           api_.request("/api/v1/organizations", {{"name", name.trimmed()}},
+                                        [this](QJsonValue value, QString e) {
+                                          if (!e.isEmpty()) {
+                                            message(e);
+                                            return;
+                                          }
+                                          api_.organization =
+                                              value.toObject().value("id").toString();
+                                          api_.request("/api/v1/av/organizations/initialize", {},
+                                                       [this](QJsonValue, QString e) {
+                                                         if (!e.isEmpty()) {
+                                                           message(e);
+                                                           return;
+                                                         }
+                                                         refreshHome();
+                                                       });
+                                        });
+                           return;
+                         }
+                         int index = 0;
+                         if (organizations.size() > 1) {
+                           QStringList names;
+                           for (const auto& value : organizations) {
+                             const auto item = value.toObject();
+                             names.append(item.value("data").toObject().value("name").toString() +
+                                          " ? " + item.value("id").toString());
+                           }
+                           bool accepted = false;
+                           const auto selected = QInputDialog::getItem(
+                               this, "选择组织", "请选择当前组织", names, 0, false, &accepted);
+                           if (!accepted) {
+                             message("请先选择一个组织");
+                             return;
+                           }
+                           index = names.indexOf(selected);
+                         }
+                         api_.organization = organizations[index].toObject().value("id").toString();
+                         refreshHome();
+                       },
+                       true);
                  });
   };
   connect(submit, &QPushButton::clicked, d, [run] { run("login"); });
@@ -755,19 +811,9 @@ void Window::joinDialog() {
 
 void Window::join(QString number, QString name, QString password) {
   message({});
-  if (api_.token.isEmpty() && api_.guest.isEmpty()) {
-    api_.request("/api/v1/conference/guest", {},
-                 [this, number, name, password](QJsonValue v, QString e) {
-                   if (!e.isEmpty()) {
-                     message(e);
-                     return;
-                   }
-                   api_.guest = v.toObject().value("guest_token").toString();
-                   join(number, name, password);
-                 });
-    return;
-  }
   api_.cancel();
+  api_.guest.clear();
+  api_.media_policy = 0;
   polling_ = false;
   pages_->setCurrentWidget(waiting_);
   waitingText_->setText("正在提交入会申请…");
@@ -805,6 +851,13 @@ void Window::applyBusiness(QJsonObject state) {
   if (state.value("id") == business_.value("id") &&
       state.value("version").toDouble() < business_.value("version").toDouble())
     return;
+  const auto next_policy = qint64(state.value("self_policy").toDouble());
+  if (running_ && api_.media_policy != 0 && next_policy > api_.media_policy) {
+    api_.media_policy = 0;
+    policyRestart_ = true;
+    mediaError_.clear();
+    session_.stop();
+  }
   business_ = state;
   if (meetingId_.isEmpty())
     meetingId_ = state.value("id").toString();
@@ -844,12 +897,16 @@ void Window::applyBusiness(QJsonObject state) {
     if (p.value("id").toString() == selectedMember)
       members_->setCurrentItem(item);
     if (p.value("id").toString() == self) {
+      if (p.value("muted").toBool()) {
+        wantMic_ = false;
+      }
       auto request = qint64(p.value("unmute_request").toDouble());
       if (request > lastUnmute_) {
         lastUnmute_ = request;
         if (running_ &&
             QMessageBox::question(this, "主持人请求", "主持人邀请你开启麦克风，是否开启？") ==
                 QMessageBox::Yes) {
+          wantMic_ = true;
           bool found = false;
           if (auto local = media_.participants.find(media_.local_sid);
               local != media_.participants.end())
@@ -894,7 +951,7 @@ void Window::applyBusiness(QJsonObject state) {
     }
     if (failed)
       message("共享授权处理中，媒体服务暂时不可用");
-    if (complete) {
+    if (complete && session_.snapshot().state == demo::State::Connected) {
       auto id = pendingShare_;
       pendingShare_.clear();
       for (auto& s : screens_)
@@ -932,7 +989,8 @@ void Window::connectMedia() {
     o.connection.token = v.value("media_token").toString().toStdString();
     o.room = v.value("room").toString().toStdString();
     o.audio_playout = true;
-    o.microphone = wantMic_;
+    const auto sources = v.value("granted_capabilities").toObject().value("sources").toArray();
+    o.microphone = wantMic_ && (sources.isEmpty() || sources.contains("microphone"));
     if (wantCamera_) {
       demo::sdk::MediaSpec spec;
       spec.capture = demo::sdk::CaptureKind::camera;
@@ -943,6 +1001,7 @@ void Window::connectMedia() {
     // Room retains refreshed tokens received from SFU signaling for rejoin.
     try {
       session_.start(std::move(o));
+      policyRestart_ = false;
     } catch (const std::exception& e) {
       mediaError_ = str(e.what());
       message(mediaError_);
@@ -963,7 +1022,7 @@ void Window::applyMedia(const demo::Snapshot& snapshot) {
                   .arg(seconds % 60, 2, 10, QChar('0'));
     }
     connection_->setText(str(demo::state_name(snapshot.state)) + clock);
-    if (!snapshot.error.empty() && mediaError_ != str(snapshot.error)) {
+    if (!policyRestart_ && !snapshot.error.empty() && mediaError_ != str(snapshot.error)) {
       mediaError_ = str(snapshot.error);
       message(mediaError_ + "；可离会后重新加入");
     }
@@ -1099,13 +1158,22 @@ void Window::command(QString action, QJsonObject data, std::function<void()> don
 }
 
 void Window::toggleMicrophone() {
+  for (const auto& value : business_.value("members").toArray()) {
+    const auto member = value.toObject();
+    if (member.value("id") == business_.value("self") && member.value("muted").toBool()) {
+      message("主持人已关闭麦克风权限，请联系主持人允许开启");
+      return;
+    }
+  }
   if (auto p = media_.participants.find(media_.local_sid); p != media_.participants.end()) {
     for (auto& t : p->second.tracks)
       if (t.source == demo::rtc::PublicationSource::microphone) {
+        wantMic_ = t.muted;
         session_.set_muted(t.sid, !t.muted);
         return;
       }
   }
+  wantMic_ = true;
   if (!session_.enable_microphone())
     message("麦克风正在连接或当前无法开启");
 }
@@ -1114,6 +1182,7 @@ void Window::toggleCamera() {
   if (auto p = media_.participants.find(media_.local_sid); p != media_.participants.end()) {
     for (auto& t : p->second.tracks)
       if (t.source == demo::rtc::PublicationSource::camera) {
+        wantCamera_ = false;
         session_.remove_video(t.sid);
         return;
       }
@@ -1128,6 +1197,7 @@ void Window::toggleCamera() {
   spec.capture = demo::sdk::CaptureKind::camera;
   spec.device_index = cameraIndex_;
   spec.local_preview = true;
+  wantCamera_ = true;
   session_.add_video(spec);
 }
 
@@ -1175,12 +1245,20 @@ void Window::memberMenu() {
   QString target = selected ? selected->data(Qt::UserRole).toString() : QString();
   auto add = [&](QString text, QString action, QJsonObject data = {}) {
     auto* a = menu.addAction(text);
-    connect(a, &QAction::triggered, this, [this, action, data] { command(action, data); });
+    connect(a, &QAction::triggered, this, [this, action, data] {
+      if (action == "request-unmute") {
+        command("mute", {{"target", data.value("target")}, {"enabled", false}},
+                [this, data] { command("request-unmute", data); });
+      } else {
+        command(action, data);
+      }
+    });
   };
   if (!target.isEmpty()) {
-    add("允许入会", "approve", {{"target", target}});
+    add("允许入会", "admit", {{"target", target}});
     add("拒绝入会", "reject", {{"target", target}});
-    add("静音", "mute", {{"target", target}});
+    add("静音", "mute", {{"target", target}, {"enabled", true}});
+    add("允许开启麦克风", "mute", {{"target", target}, {"enabled", false}});
     add("请求开启麦克风", "request-unmute", {{"target", target}});
     add("设为主持人", "transfer", {{"target", target}});
     add("移出会议", "remove", {{"target", target}});

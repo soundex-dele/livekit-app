@@ -16,7 +16,7 @@ using Json = nlohmann::json;
 
 struct Snapshot {
   Json user, live, rooms = Json::array(), events = Json::array();
-  std::string server_url, broadcast, error, state = "未开播";
+  std::string server_url, organization, broadcast, error, state = "未开播";
   bool busy = false, connected = false;
   double bitrate_kbps = 0, publish_fps = 0;
   Json media_stats = Json::array();
@@ -30,7 +30,8 @@ class Session {
   ~Session();
   std::shared_ptr<sdk::Studio> engine() const;
   Snapshot snapshot() const;
-  void login(std::string url, std::string name, std::string password, bool register_account);
+  void login(std::string url, std::string name, std::string password, bool register_account,
+             std::string organization = {});
   void logout();
   void change_password(std::string old_password, std::string password);
   void start(std::string title);
@@ -57,7 +58,7 @@ class Session {
   std::deque<Json> incoming_;
   std::shared_ptr<sdk::Studio> engine_;
   std::filesystem::path settings_;
-  std::string url_ = "http://127.0.0.1:8080", token_, broadcast_, stage_key_;
+  std::string url_ = "http://127.0.0.1:8080", token_, organization_, broadcast_, stage_key_;
   std::unique_ptr<MediaSession> program_, stage_;
   std::unique_ptr<ix::WebSocket> events_;
   int64_t sequence_ = 0;

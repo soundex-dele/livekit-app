@@ -30,9 +30,9 @@ int main(int argc, char** argv) {
     return 2;
   try {
     remote_app::Session host(true, std::make_shared<Sink>());
-    host.start(argv[1]);
+    host.start(argv[1], "fixture", "fixture-password");
     cancel_and_wait(host);
-    host.start(argv[1]);
+    host.start(argv[1], "fixture", "fixture-password");
     cancel_and_wait(host);
     remote_app::Controller controller;
     controller.start(argv[1], "0123456789", "late response");

@@ -1,6 +1,7 @@
 import { errorText, statusText } from '../../../../../packages/web/locale';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { api, terminal, type SessionInfo } from '../services/api';
+import { control, mountAccountPanel } from '../../../../../packages/web/control';
 import '../style.css';
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const receive = element<HTMLButtonElement>('receive'), stop = element<HTMLButtonElement>('stop'), fullscreen = element<HTMLButtonElement>('fullscreen');
@@ -8,6 +9,7 @@ const badge = element('badge'), code = element('code'), expiry = element('expiry
 const video = document.querySelector('video')!;
 type Run = { session?: SessionInfo; room?: Room; stopped: boolean; connecting: boolean; connected: boolean; frames: boolean; nextHeartbeat: number; frameCallback?: number };
 let current: Run | undefined;
+mountAccountPanel(document.querySelector('.intro')!, () => { if (current) void finish(current, '组织或账号已切换，请重新创建投屏。'); });
 function active(run: Run) { return current === run && !run.stopped; }
 async function finish(run: Run, message = '', state = '已结束') {
  if (run.stopped) return;
@@ -49,6 +51,7 @@ async function connect(run: Run) {
 }
 receive.addEventListener('click',async()=>{
  if(current)return;
+ if(!control.organization){error.textContent='请先在“账号与组织”中登录并选择组织。';return;}
  const run: Run = {stopped:false,connecting:false,connected:false,frames:false,nextHeartbeat:0};current=run;
  receive.disabled=true;stop.disabled=false;error.textContent='';badge.textContent='正在生成投屏码';
  try {
@@ -59,7 +62,7 @@ receive.addEventListener('click',async()=>{
    const s=await api<SessionInfo>(`sessions/${session.id}`,session.credential);
    if(!active(run))break;
    if(terminal(s)){await finish(run,s.reason ? statusText(s.reason) : '',s.state==='expired'?'投屏码已过期':'已结束');break;}
-   if(s.state==='waiting')expiry.textContent=`有效期剩余 ${Math.max(0,Math.ceil((Date.parse(s.expires_at)-Date.now())/1000))} 秒`;
+   if(s.state==='waiting')expiry.textContent=`有效期剩余 ${Math.max(0,Math.ceil((Date.parse(session.expires_at)-Date.now())/1000))} 秒`;
    else {
     code.textContent='已配对';expiry.textContent='';
     if(!run.connecting)void connect(run);

@@ -248,9 +248,12 @@ void Controller::run(std::string url, std::string code, std::string name) {
   std::string id, credential;
   try {
     sdk::Json body = {{"code", code}, {"name", name}};
-    auto grant = request(url, "/api/v1/remote-control/pairings/redeem", "", &body);
-    id = grant.at("id");
-    credential = grant.at("credential");
+    auto paired = request(url, "/api/v1/av/remote-control/redeem", "", &body);
+    id = paired.at("resource_id");
+    credential = paired.at("credential");
+    auto empty = sdk::Json::object();
+    auto grant = grant_view(request(url, "/api/v1/av/remote-control/sessions/" + id + "/request",
+                                    "", &empty, {"", credential}));
     {
       std::lock_guard lock(mutex_);
       snapshot_.state = "pending";
@@ -258,9 +261,17 @@ void Controller::run(std::string url, std::string code, std::string name) {
     }
     bool started = false;
     auto next = sdk::ControlClock::now();
+    auto presence = next;
     while (!stop_) {
+      if (sdk::ControlClock::now() >= presence) {
+        request(url, "/api/v1/av/remote-control/sessions/" + id + "/heartbeat", "", &empty,
+                {"", credential});
+        presence = sdk::ControlClock::now() + 3s;
+      }
       if (sdk::ControlClock::now() >= next) {
-        grant = request(url, "/api/v1/remote-control/control-grants/" + id, credential);
+        auto snapshot =
+            request(url, "/api/v1/av/remote-control/sessions/" + id, "", nullptr, {"", credential});
+        grant = grant_view(snapshot.value("control_grant", sdk::Json::object()));
         if (stop_)
           break;
         auto state = grant.at("state").get<std::string>();
@@ -287,7 +298,8 @@ void Controller::run(std::string url, std::string code, std::string name) {
   if (!id.empty())
     try {
       sdk::Json empty = sdk::Json::object();
-      request(url, "/api/v1/remote-control/control-grants/" + id + "/revoke", credential, &empty);
+      request(url, "/api/v1/av/remote-control/sessions/" + id + "/stop", "", &empty,
+              {"", credential});
     } catch (const std::exception& e) {
       fail(e.what());
     }
@@ -306,10 +318,19 @@ void Controller::media(std::string url, sdk::Json grant, std::string credential)
   try {
     const auto run_media = [&]() -> sdk::Result<void> {
       sdk::Json empty = sdk::Json::object();
-      auto connect = request(
-          url,
-          "/api/v1/remote-control/control-grants/" + grant.at("id").get<std::string>() + "/connect",
-          credential, &empty);
+      auto access = av::request_result(url,
+                                       "/api/v1/av/remote-control/sessions/" +
+                                           grant.value("resource_id", std::string{}) + "/connect",
+                                       "", &empty, {"", credential});
+      if (!access) {
+        return sdk::Result<void>::failure(access.failure_record());
+      }
+      auto credentials = av::media_credentials(url, access->value("grant_id", std::string{}), "",
+                                               {"", credential}, &stop_);
+      if (!credentials) {
+        return sdk::Result<void>::failure(credentials.failure_record());
+      }
+      auto connect = *credentials;
       if (stop_)
         return sdk::Result<void>::success();
       connection =

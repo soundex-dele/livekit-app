@@ -37,7 +37,8 @@ void require(bool ok) {
 }  // namespace
 
 livekit::sdk::Json request(const std::string& base, const std::string& path,
-                           const std::string& credential, const livekit::sdk::Json* body) {
+                           const std::string& credential, const livekit::sdk::Json* body,
+                           const RequestOptions& options) {
   auto url = wide(base + path);
   URL_COMPONENTS parts{};
   parts.dwStructSize = sizeof(parts);
@@ -61,9 +62,15 @@ livekit::sdk::Json request(const std::string& base, const std::string& path,
   require(req.value != nullptr);
   DWORD redirects = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
   require(WinHttpSetOption(req, WINHTTP_OPTION_REDIRECT_POLICY, &redirects, sizeof(redirects)));
-  std::wstring headers = L"Content-Type: application/json\r\nX-AV-Client: desktop\r\n";
+  std::wstring headers = L"Content-Type: application/json\r\nX-Foundation-Request: 1\r\n";
   if (!credential.empty())
     headers += L"Authorization: Bearer " + wide(credential) + L"\r\n";
+  if (!options.organization.empty()) {
+    headers += L"X-Organization-ID: " + wide(options.organization) + L"\r\n";
+  }
+  if (!options.resource_credential.empty()) {
+    headers += L"X-AV-Resource-Credential: " + wide(options.resource_credential) + L"\r\n";
+  }
   auto raw = body ? body->dump() : std::string();
   require(WinHttpSendRequest(req, headers.c_str(), static_cast<DWORD>(headers.size()),
                              raw.empty() ? WINHTTP_NO_REQUEST_DATA : raw.data(),
@@ -92,6 +99,32 @@ livekit::sdk::Json request(const std::string& base, const std::string& path,
     }
     throw std::runtime_error(message);
   }
-  return livekit::sdk::Json::parse(result);
+  auto value = livekit::sdk::Json::parse(result);
+  if (path == "/api/v1/auth/login" || path == "/api/v1/auth/register" ||
+      path == "/api/v1/auth/refresh") {
+    DWORD length = 0;
+    WinHttpQueryHeaders(req, WINHTTP_QUERY_SET_COOKIE, WINHTTP_HEADER_NAME_BY_INDEX, nullptr,
+                        &length, WINHTTP_NO_HEADER_INDEX);
+    if (length > 0 && length < 65536) {
+      std::wstring cookie(length / sizeof(wchar_t), L'\0');
+      if (WinHttpQueryHeaders(req, WINHTTP_QUERY_SET_COOKIE, WINHTTP_HEADER_NAME_BY_INDEX,
+                              cookie.data(), &length, WINHTTP_NO_HEADER_INDEX)) {
+        const auto start = cookie.find(L"pf_session=");
+        if (start != std::wstring::npos) {
+          const auto end = cookie.find(L';', start);
+          const auto token = cookie.substr(start + 11, end - start - 11);
+          std::string session_token;
+          session_token.reserve(token.size());
+          for (const auto character : token) {
+            if (character > 0 && character < 128) {
+              session_token.push_back(static_cast<char>(character));
+            }
+          }
+          value["session_token"] = session_token;
+        }
+      }
+    }
+  }
+  return value;
 }
 }  // namespace av

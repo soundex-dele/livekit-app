@@ -57,6 +57,7 @@ class MainWindow : public QMainWindow {
   std::unique_ptr<Platform> platform_;
   ControlWindow* control_ = nullptr;
   QLineEdit *url_, *name_, *code_, *remote_code_;
+  QLineEdit *account_, *password_, *organization_;
   QLabel *status_, *expiry_, *request_, *permissions_, *shortcut_;
   QPushButton *create_, *connect_, *approve_, *reject_, *stop_, *copy_;
   QWidget* pending_;

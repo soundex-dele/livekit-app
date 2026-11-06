@@ -87,13 +87,19 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
       if (!stop_) {
         setState("connecting");
         sdk::Json body{{"code", code}};
-        auto v = av::request(url, "/api/v1/screen-cast/redeem", "", &body);
+        auto v = av::request(url, "/api/v1/av/screen-cast/redeem", "", &body);
         id = v.at("id");
         key = v.at("credential");
         if (!stop_) {
           auto empty = sdk::Json::object();
-          auto conn =
-              av::request(url, "/api/v1/screen-cast/sessions/" + id + "/connect", key, &empty);
+          auto conn = av::request(url, "/api/v1/av/screen-cast/sessions/" + id + "/connect", "",
+                                  &empty, {"", key});
+          auto credentials = av::media_credentials(url, conn.value("grant_id", std::string{}), "",
+                                                   {"", key}, &stop_);
+          if (!credentials) {
+            return sdk::Result<void>::failure(credentials.failure_record());
+          }
+          conn = *credentials;
           if (!stop_) {
             engine = std::make_unique<rtc::MediaEngine>();
             rtc::ConnectionOptions options;
@@ -172,8 +178,8 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
               participants = std::move(current);
               if (std::chrono::steady_clock::now() >= next) {
                 sdk::Json beat{{"connected", true}};
-                v = av::request(url, "/api/v1/screen-cast/sessions/" + id + "/heartbeat", key,
-                                &beat);
+                v = av::request(url, "/api/v1/av/screen-cast/sessions/" + id + "/heartbeat", "",
+                                &beat, {"", key});
                 auto state = v.at("state").get<std::string>();
                 setState(state);
                 if (state == "ended" || state == "expired") {
@@ -213,7 +219,7 @@ void Session::run(std::string url, std::string code, sdk::ScreenCaptureDevice di
   if (!id.empty()) {
     try {
       auto empty = sdk::Json::object();
-      av::request(url, "/api/v1/screen-cast/sessions/" + id + "/stop", key, &empty);
+      av::request(url, "/api/v1/av/screen-cast/sessions/" + id + "/stop", "", &empty, {"", key});
     } catch (const std::exception& e) {
       std::lock_guard lock(mutex_);
       if (snapshot_.error.empty()) {

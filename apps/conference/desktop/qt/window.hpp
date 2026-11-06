@@ -54,7 +54,7 @@ class Window : public QMainWindow {
   QJsonArray meetings_;
   QString meetingId_, serverError_, mediaError_, chatStamp_;
   bool running_, closing_ = false, leaving_ = false, connecting_ = false, polling_ = false,
-                 wantCamera_ = false, wantMic_ = false;
+                 wantCamera_ = false, wantMic_ = false, policyRestart_ = false;
   int cameraIndex_ = 0, videoPage_ = 0;
   qint64 lastUnmute_ = 0;
   QString pendingShare_;

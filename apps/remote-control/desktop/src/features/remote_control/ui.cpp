@@ -483,6 +483,15 @@ MainWindow::MainWindow(bool test)
   url_->setObjectName("serviceUrl");
   url_->setPlaceholderText("http://192.168.1.20:8080");
   form->addRow("业务服务地址", url_);
+  account_ = new QLineEdit;
+  account_->setPlaceholderText("生成本机连接码需要组织成员账号");
+  password_ = new QLineEdit;
+  password_->setEchoMode(QLineEdit::Password);
+  organization_ = new QLineEdit;
+  organization_->setPlaceholderText("只有一个组织时可留空");
+  form->addRow("账号", account_);
+  form->addRow("密码", password_);
+  form->addRow("组织 ID", organization_);
   settings->addLayout(form);
   settings->addWidget(label("连接期间不能修改地址。HTTPS 使用系统信任证书。"));
   auto screen = button("检查屏幕录制权限", "screenPermission"),
@@ -574,7 +583,8 @@ MainWindow::MainWindow(bool test)
         return;
       }
       save();
-      host_.start(url_->text().trimmed().toStdString());
+      host_.start(url_->text().trimmed().toStdString(), account_->text().trimmed().toStdString(),
+                  password_->text().toStdString(), organization_->text().trimmed().toStdString());
       refresh();
     } catch (const std::exception& e) {
       error(e.what());
@@ -695,7 +705,8 @@ void MainWindow::refresh() {
     // A failed revoke must stay visible instead of silently creating a new code.
     if (h.error.empty() && !closing_) {
       try {
-        host_.start(url_->text().trimmed().toStdString());
+        host_.start(url_->text().trimmed().toStdString(), account_->text().trimmed().toStdString(),
+                    password_->text().toStdString(), organization_->text().trimmed().toStdString());
         h = host_.snapshot();
       } catch (const std::exception& e) {
         error(e.what());

@@ -1,38 +1,47 @@
 #include <av/http.hpp>
 #include <iostream>
-#include <stdexcept>
 using livekit::sdk::Json;
 
-void check(bool value, const char* message) {
-  if (!value)
-    throw std::runtime_error(message);
-}
-
 int main(int argc, char** argv) {
-  try {
-    if (argc != 2)
-      throw std::runtime_error("test URL required");
-    std::string base = argv[1];
-    auto result = av::request(base, "/get", "test-token");
-    check(result.at("ok") == true, "GET JSON");
-    Json body{{"text", "你好，直播助手"}};
-    check(av::request(base, "/post", "test-token", &body) == body, "UTF-8 POST body");
-    for (auto path : {"/redirect", "/error", "/oversize", "/slow"}) {
-      bool rejected = false;
-      try {
-        av::request(base, path, "test-token");
-      } catch (const std::exception&) {
-        rejected = true;
-      }
-      check(rejected, "unsafe or failed request accepted");
-    }
-    auto stats = av::request(base, "/stats", "");
-    check(stats.at("redirected") == 0, "redirect leaked credentials");
-    check(stats.at("headers_ok") == true, "request headers");
-    std::cout << "HTTP transport passed\n";
-    return 0;
-  } catch (const std::exception& e) {
-    std::cerr << e.what() << '\n';
+  if (argc != 2) {
+    std::cerr << "test URL required\n";
     return 1;
   }
+  const std::string base = argv[1];
+  auto result = av::request_result(base, "/get", "test-token");
+  if (!result || !result->value("ok", false)) {
+    return 2;
+  }
+  Json body{{"text", "你好，直播助手"}};
+  auto posted = av::request_result(base, "/post", "test-token", &body, {"org-one", ""});
+  if (!posted || *posted != body) {
+    return 3;
+  }
+  auto guest = av::request_result(base, "/guest", "", nullptr, {"", "visitor-secret"});
+  if (!guest || !guest->value("ok", false)) {
+    return 4;
+  }
+  auto login = av::request_result(base, "/api/v1/auth/login", "", &body);
+  if (!login || login->value("session_token", "") != "cookie-test-token") {
+    return 5;
+  }
+  auto media = av::media_credentials(base, "test-grant", "test-token", {"org-one", ""});
+  if (!media || media->value("media_token", "") != "rtc-test-token") {
+    return 6;
+  }
+  for (auto path : {"/redirect", "/error", "/oversize", "/slow"}) {
+    if (av::request_result(base, path, "test-token")) {
+      return 7;
+    }
+  }
+  if (av::request_result(base, "/get", "bad\r\ncredential")) {
+    return 8;
+  }
+  auto stats = av::request_result(base, "/stats", "");
+  if (!stats || stats->value("redirected", -1) != 0 || !stats->value("headers_ok", false) ||
+      stats->value("grant_attempts", 0) != 2) {
+    return 9;
+  }
+  std::cout << "HTTP transport, Foundation auth and RTC grant retry passed\n";
+  return 0;
 }

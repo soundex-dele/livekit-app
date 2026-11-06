@@ -881,6 +881,9 @@ struct Window::Impl {
     auto state = session->snapshot();
     auto* url = new QLineEdit(q(state.server_url));
     form->addRow(QStringLiteral("服务地址"), url);
+    auto* organization = new QLineEdit(q(state.organization));
+    organization->setPlaceholderText(QStringLiteral("只有一个组织时可留空"));
+    form->addRow(QStringLiteral("组织 ID"), organization);
     auto* name = new QLineEdit;
     form->addRow(QStringLiteral("用户名"), name);
     auto* password = new QLineEdit;
@@ -911,7 +914,7 @@ struct Window::Impl {
     QObject::connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     QObject::connect(login, &QPushButton::clicked, &dialog, [&] {
       session->login(s(url->text()), s(name->text()), s(password->text()),
-                     registration->isChecked());
+                     registration->isChecked(), s(organization->text().trimmed()));
       password->clear();
     });
     QObject::connect(logout, &QPushButton::clicked, &dialog, [&] { session->logout(); });

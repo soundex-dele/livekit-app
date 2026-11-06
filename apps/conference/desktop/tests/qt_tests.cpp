@@ -260,19 +260,22 @@ class MeetingTests : public QObject {
           QByteArray body = "{}";
           auto route = bytes.split(' ').value(1);
           if (route == "/api/v1/auth/login")
-            body = R"({"session_token":"test-session","user":{"id":"u1","name":"alice"}})";
-          else if (route == "/api/v1/conference/meetings" && bytes.startsWith("GET"))
-            body = "[]";
-          else if (route == "/api/v1/conference/meetings")
+            body = R"({"user":{"id":"u1","name":"alice"}})";
+          else if (route == "/api/v1/organizations")
+            body = R"({"items":[{"id":"org1","data":{"name":"Test organization"}}]})";
+          else if (route == "/api/v1/av/conference/meetings" && bytes.startsWith("GET"))
+            body = "{\"items\":[]}";
+          else if (route == "/api/v1/av/conference/meetings")
             body = R"({"id":"m1","number":"123456789"})";
-          else if (route == "/api/v1/conference/join")
-            body = R"({"id":"m1","member_id":"p1"})";
-          else if (route.endsWith("/presence"))
+          else if (route == "/api/v1/av/conference/join")
+            body = R"({"id":"m1","subject_id":"u1","state":"active","role":"host"})";
+          else if (route == "/api/v1/av/conference/meetings/m1")
             body =
-                R"({"id":"m1","number":"123456789","title":"测试会议","state":"active","status":"approved","self":"p1","host":"p1","members":[],"operations":[],"version":1})";
+                R"({"meeting":{"id":"m1","title":"测试会议","state":"active","version":1},"number":"123456789","host":"u1","members":[{"subject_id":"u1","state":"active","policy_version":1}]})";
           socket->write(
               "HTTP/1.1 200 OK\r\nContent-Type: "
-              "application/json\r\nContent-Length: " +
+              "application/json\r\nSet-Cookie: pf_session=test-session; "
+              "HttpOnly\r\nContent-Length: " +
               QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
           socket->disconnectFromHost();
         });
