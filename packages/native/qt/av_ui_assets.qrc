@@ -1,0 +1,8 @@
+<RCC>
+  <qresource prefix="/av/ui">
+    <file alias="down-light.xpm">assets/down-light.xpm</file>
+    <file alias="up-light.xpm">assets/up-light.xpm</file>
+    <file alias="down-dark.xpm">assets/down-dark.xpm</file>
+    <file alias="up-dark.xpm">assets/up-dark.xpm</file>
+  </qresource>
+</RCC>

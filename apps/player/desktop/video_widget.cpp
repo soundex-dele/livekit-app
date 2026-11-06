@@ -67,9 +67,9 @@ QRect VideoWidget::imageRect() const {
 void VideoWidget::paintIdleScreen(QPainter& p) {
   const int side = std::clamp(std::min(width(), height()) / 5, 64, 104);
   const QRect logo((width() - side) / 2, (height() - side) / 2 - 44, side, side);
-  p.setPen(QPen(QColor("#2b3a4d"), 2));
-  p.setBrush(QColor(18, 24, 33, 210));
-  p.drawEllipse(logo);
+  p.setPen(QPen(QColor("#34435A"), 1));
+  p.setBrush(QColor("#151F30"));
+  p.drawRoundedRect(logo, 24, 24);
   const int extent = side / 3;
   const QPoint center = logo.center();
   QPolygon triangle;
@@ -77,10 +77,10 @@ void VideoWidget::paintIdleScreen(QPainter& p) {
            << QPoint(center.x() - extent / 2 + 3, center.y() + extent / 2)
            << QPoint(center.x() + extent / 2 + 3, center.y());
   p.setPen(Qt::NoPen);
-  p.setBrush(QColor("#7fb4f5"));
+  p.setBrush(QColor("#93BBFF"));
   p.drawPolygon(triangle);
   QFont font = p.font();
-  font.setPixelSize(15);
+  font.setPixelSize(18);
   p.setFont(font);
   p.setPen(QColor("#c8d6e8"));
   const QString hint = message_.isEmpty() ? QStringLiteral("打开文件，或将视频拖到这里") : message_;
@@ -88,7 +88,7 @@ void VideoWidget::paintIdleScreen(QPainter& p) {
              Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, hint);
   font.setPixelSize(12);
   p.setFont(font);
-  p.setPen(QColor("#718096"));
+  p.setPen(QColor("#ADBCD1"));
   p.drawText(QRect(20, logo.bottom() + 60, std::max(1, width() - 40), 28),
              Qt::AlignHCenter | Qt::AlignTop,
              QStringLiteral("Ctrl+O 打开媒体文件  ·  也可直接拖入"));
@@ -120,7 +120,7 @@ void VideoWidget::paintFlash(QPainter& p) {
 
 void VideoWidget::paintEvent(QPaintEvent*) {
   QPainter p(this);
-  p.fillRect(rect(), QColor("#080a0d"));
+  p.fillRect(rect(), QColor("#0B1220"));
   p.setRenderHint(QPainter::SmoothPixmapTransform);
   p.setRenderHint(QPainter::Antialiasing);
   if (!image_.isNull())

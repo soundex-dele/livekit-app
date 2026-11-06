@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "source": "../../../../../platform-foundation",
+  "files": {
+    "package-lock.json": "8c8920804990b706ae6d93dced23769aaa18ba48eff64c367873a16012959907",
+    "package.json": "099d173908216d8b293345bc01f3242debbcbc74c48d72aecbd388743d0afe16",
+    "packages/admin/README.md": "fd4fc6ddb07533b9b9e116398e38620fed35d430716a33915135287cd59b861f",
+    "packages/admin/package.json": "5a2696e1d30e5741f415c277c00496312208501863dd8daa037153f075b16b6a",
+    "packages/admin/src/index.tsx": "03bc9f206ebe434e4099a79009a67fa11cd5538af7b37483204fc29c2a3c13d4",
+    "packages/admin/src/navigation.ts": "a9af4ced61aed789c819827ca9d83204d8194c743cf6e950fafd9043d82311db",
+    "packages/react/package.json": "fd7fdc6790ca12691a08fd54d0bb7439b851e882ab3966673cdd404359cfa067",
+    "packages/react/src/index.tsx": "714451b7496f47942b8b95ac69e6776fc457e62ba0fb6476e50b6c5dd815d41f",
+    "packages/sdk/package.json": "c359fd4a524e9db75fc0814833fc4fe3dae6e6952ba4dc49f011ea5442b0dfd3",
+    "packages/sdk/src/client.ts": "19448d5a4629b5c68e6ba1520ed5a73afa734b1f2b6ef62df63d7ec8633dbded",
+    "packages/sdk/src/generated.ts": "ccaa8f7f5eec82e7d0e4c92af373cc3d8d91efb950a6d161341007fe8c88ce15",
+    "packages/sdk/src/index.ts": "a8d2004f472957879c0de30a5d5c5ce57e3d7b43b85327dc0dc55a47f00bf40b",
+    "packages/sdk/src/schema.ts": "02df813828cc98def5b58d205f588722c07d15c4b9c84346458d941a62e48762",
+    "packages/ui/package.json": "7e28f54c3786e130def3a832fa5794bc2cedc72a2a3eebc35f5b01c6aea0e75f",
+    "packages/ui/src/index.tsx": "67a45e2ec81c1d74efc719c72c26335853195fc82d055450a64ad5a94a1946c3",
+    "tools/build-packages.mjs": "53c1a96ba190dd7429a18413140ebb7c2922fc63ac20ecfaec93e277bfb56683"
+  },
+  "packages": {
+    "sdk": {
+      "file": "platform-sdk-0.2.0.tgz",
+      "integrity": "sha512-LQxE0JzbV1q29A5Pilsz0wNcu7KFqa2vsVa95AYmF/r4wxhWuw86FXQTNOzLsR78Ogv+zMQRK+fIt9iMJtCXcA==",
+      "sha256": "a200fa2843d99fa1700f92df5b844f97da7dd256a139adde6e2ca3db281171c9"
+    },
+    "react": {
+      "file": "platform-react-0.2.0.tgz",
+      "integrity": "sha512-+qp6Dj4TRvZ6JMpv5Fg5vmDfSDOQefb/6cRwso85NX7+VYsBDiruc0yB1tp2b9iHLoYTbEfLK/5QMCJ9XSgqYg==",
+      "sha256": "58220f054dc1b64ca824b24408a436bbd08a9c40d6d59f8a898e66e6716b7b7b"
+    },
+    "ui": {
+      "file": "platform-ui-0.2.0.tgz",
+      "integrity": "sha512-aXtf5XM/NxnNIt1lQgwTaO8fx7FpiUGF7guUB26BKGbAqMKjhqLH2fi3mjg5YjFHg9VsRov090tWALdCDeG5Jw==",
+      "sha256": "d6902c9367da8588272a94ac67189ffe459419984d2b1a1248c030f0aee1da38"
+    },
+    "admin": {
+      "file": "platform-admin-0.2.0.tgz",
+      "integrity": "sha512-rN9pSMmEQB4JBKbNOpxRoSVPVfgfoy2mcZ0nr2KuY+NtWZtkYSMwcQTcso+NUdYHN/TG43KJct2C3HXGKrfHfw==",
+      "sha256": "8beda22257347e8aedc78a0d983b994f301b64be3f5db03aff5caef840b21d1c"
+    }
+  }
+}

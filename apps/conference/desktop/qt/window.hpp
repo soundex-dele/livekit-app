@@ -8,6 +8,7 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <QTimer>
+#include <functional>
 class QStackedWidget;
 class QLabel;
 class QListWidget;
@@ -65,7 +66,8 @@ class Window : public QMainWindow {
   void settings();
   void schedule(QJsonObject existing = {});
   void joinDialog();
-  void join(QString number, QString name, QString password);
+  void join(QString number, QString name, QString password,
+            std::function<void(QString)> on_complete = {});
   void refreshHome();
   void poll();
   void connectMedia();

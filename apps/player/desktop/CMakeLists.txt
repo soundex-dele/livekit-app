@@ -10,6 +10,9 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Multimedia)
+if(NOT TARGET av_ui_qt)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../packages/native/qt" "${CMAKE_BINARY_DIR}/av_ui_qt")
+endif()
 # Icons are painted in code; QtSvg is only needed if a build wants to use the
 # bundled SVG artwork via the image-formats plugin. Keep it optional so the app
 # builds against Qt packages that ship only Widgets/Multimedia.
@@ -24,7 +27,7 @@ add_library(livekit_player_app STATIC
   audio_output.cpp controller.cpp playlist.cpp settings.cpp video_widget.cpp window.cpp
   subtitles.cpp resources.qrc)
 target_include_directories(livekit_player_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(livekit_player_app PUBLIC LiveKit::Player Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(livekit_player_app PUBLIC LiveKit::Player Qt6::Widgets Qt6::Multimedia av_ui_qt)
 if(TARGET Qt6::Svg)
   target_link_libraries(livekit_player_app PUBLIC Qt6::Svg)
 endif()
@@ -90,6 +93,6 @@ if(BUILD_TESTING)
   livekit_player_runtime(livekit_player_ui_tests)
   add_test(NAME local_player_ui COMMAND livekit_player_ui_tests)
   set_tests_properties(local_player_ui PROPERTIES FIXTURES_REQUIRED player_app_media TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-  add_test(NAME local_player_ui_hidpi COMMAND livekit_player_ui_tests layout)
+  add_test(NAME local_player_ui_hidpi COMMAND livekit_player_ui_tests layout themedDialogs)
   set_tests_properties(local_player_ui_hidpi PROPERTIES TIMEOUT 20 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2")
 endif()

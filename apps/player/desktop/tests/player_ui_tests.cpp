@@ -16,6 +16,9 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QDir>
+#include <QDialog>
+#include <QSpinBox>
+#include <QScopeGuard>
 #include <algorithm>
 
 using namespace player_demo;
@@ -393,6 +396,42 @@ class PlayerTests : public QObject {
     QVERIFY(action(restored, "repeat1")->isChecked());
     restored.close();
     QTRY_VERIFY(restored.controller().finished());
+  }
+
+  void themedDialogs() {
+    QTemporaryDir directory;
+    PlayerWindow window(directory.filePath("dialog-settings.ini"), true,
+                        std::make_unique<FakeOutput>());
+    window.show();
+    QDir().mkpath(PLAYER_SCREENSHOTS);
+    const auto originalDelay = window.controller().subtitles.delay_ms;
+    for (const char* name : {"settings", "subtitleSettings", "shortcuts"}) {
+      bool checked = false;
+      QTimer::singleShot(0, [&checked, name] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        const auto close = qScopeGuard([dialog] {
+          if (dialog) {
+            dialog->reject();
+          }
+        });
+        QVERIFY(dialog);
+        QCOMPARE(dialog->property("uiDialog").toBool(), true);
+        QCOMPARE(dialog->property("uiTheme").toString(), QStringLiteral("dark"));
+        QVERIFY(dialog->findChild<QWidget*>("avDialogFooter"));
+        if (auto* delay = dialog->findChild<QSpinBox*>("subtitleDelay")) {
+          delay->setValue(12300);
+        }
+        const QString suffix = qEnvironmentVariable("QT_SCALE_FACTOR") == "2" ? "-2x" : "";
+        QVERIFY(dialog->grab().save(QString(PLAYER_SCREENSHOTS) + "/dialog-" + name + suffix + ".png"));
+        checked = true;
+        QTest::keyClick(dialog, Qt::Key_Escape);
+      });
+      action(window, name)->trigger();
+      QVERIFY(checked);
+    }
+    QCOMPARE(window.controller().subtitles.delay_ms, originalDelay);
+    window.close();
+    QTRY_VERIFY(window.controller().finished());
   }
 
   void layout() {

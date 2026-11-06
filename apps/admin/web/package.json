@@ -1,0 +1,39 @@
+{
+  "name": "av-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:foundation": "node scripts/prepare-foundation.mjs",
+    "generate": "node scripts/generate-contract.mjs",
+    "generate:check": "node scripts/generate-contract.mjs --check",
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "verify": "npm run generate:check && npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@platform/admin": "file:out/foundation/platform-admin-0.2.0.tgz",
+    "@platform/react": "file:out/foundation/platform-react-0.2.0.tgz",
+    "@platform/sdk": "file:out/foundation/platform-sdk-0.2.0.tgz",
+    "@platform/ui": "file:out/foundation/platform-ui-0.2.0.tgz",
+    "@tanstack/react-query": "5.106.1",
+    "antd": "5.29.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zustand": "4.5.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "24.0.0",
+    "@types/react": "18.3.1",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "5.2.0",
+    "openapi-typescript": "7.10.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.10"
+  }
+}

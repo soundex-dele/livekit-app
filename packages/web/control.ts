@@ -1,3 +1,5 @@
+import { createButton, createDialog, confirmAction } from './ui';
+
 export interface RequestOptions {
   credential?: string;
   keepalive?: boolean;
@@ -95,41 +97,137 @@ export class ControlClient {
 
 export const control = new ControlClient();
 
-export function mountAccountPanel(host: HTMLElement, changed: () => void = () => {}) {
-  const panel = document.createElement('details');
-  panel.className = 'av-account-panel';
-  panel.innerHTML = `<summary>账号与组织</summary><form class="av-account-login"><label>用户名<input name="name" autocomplete="username" required></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">登录</button></form><label>当前组织<select aria-label="当前组织"><option value="">请先登录</option></select></label><form class="av-organization-create"><label>新组织名称<input name="organization" maxlength="100" required></label><button type="submit">创建组织</button></form><button class="av-account-logout" type="button">退出账号</button><p role="status" aria-live="polite"></p>`;
-  const status = panel.querySelector<HTMLParagraphElement>('p')!;
-  const select = panel.querySelector<HTMLSelectElement>('select')!;
-  const login = panel.querySelector<HTMLFormElement>('.av-account-login')!;
-  const create = panel.querySelector<HTMLFormElement>('.av-organization-create')!;
-  const logout = panel.querySelector<HTMLButtonElement>('.av-account-logout')!;
-  let busy = false;
+export interface AccountPanelOptions {
+  registration?: boolean;
+  trigger?: HTMLButtonElement;
+  dialogId?: string;
+}
+
+/** Shared account/organization UI. Credentials stay in HttpOnly cookies. */
+export function mountAccountPanel(host: HTMLElement, changed: () => void = () => {}, options: AccountPanelOptions = {}) {
+  const trigger = options.trigger ?? createButton('账号与组织');
+  if (!options.trigger) host.append(trigger);
+  const dialog = createDialog({id: options.dialogId ?? 'account-dialog', title: '账号与组织', description: '管理登录状态与当前工作组织。'});
+  dialog.title.id = 'auth-title';
+  dialog.element.setAttribute('aria-labelledby', 'auth-title');
+  dialog.close.id = 'close-auth';
+  dialog.error.id = 'auth-error';
+  dialog.content.innerHTML = `<form id="auth-form" class="av-account-login">
+    <label for="username">用户名<input id="username" name="name" autocomplete="username" maxlength="32" required></label>
+    <p class="hint" id="username-hint" hidden>3–32 位字母、数字或下划线</p>
+    <label for="password">密码<input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required></label>
+    <p class="hint" id="password-hint" hidden>至少 10 个字符</p>
+    <button class="av-button--primary" id="submit-auth" type="submit">登录</button>
+    <button class="av-button--ghost" id="toggle-auth" type="button" ${options.registration ? '' : 'hidden'}>没有账号？注册</button>
+  </form>
+  <section class="av-account-session" hidden>
+    <p class="av-account-status av-alert" role="status" aria-live="polite"></p>
+    <label>当前组织<select aria-label="当前组织"><option value="">选择组织</option></select></label>
+    <form class="av-organization-create"><label>创建新组织<input name="organization" maxlength="100" placeholder="组织名称" required></label><button type="submit">创建组织</button></form>
+    <button class="av-account-logout av-button--danger" type="button">退出账号</button>
+  </section>`;
+  const login = dialog.content.querySelector<HTMLFormElement>('.av-account-login')!;
+  const session = dialog.content.querySelector<HTMLElement>('.av-account-session')!;
+  const status = session.querySelector<HTMLElement>('.av-account-status')!;
+  const select = session.querySelector<HTMLSelectElement>('select')!;
+  const create = session.querySelector<HTMLFormElement>('.av-organization-create')!;
+  const logout = session.querySelector<HTMLButtonElement>('.av-account-logout')!;
+  const username = login.querySelector<HTMLInputElement>('#username')!;
+  const password = login.querySelector<HTMLInputElement>('#password')!;
+  const submit = login.querySelector<HTMLButtonElement>('#submit-auth')!;
+  const toggle = login.querySelector<HTMLButtonElement>('#toggle-auth')!;
+  const done = createButton('完成');
+  done.onclick = () => dialog.element.close();
+  dialog.actions.append(done);
+  document.body.append(dialog.element);
+  let busy = false, registered = false, loggedIn = false;
+  function registrationMode(value: boolean) {
+    registered = value;
+    dialog.error.textContent = '';
+    dialog.title.textContent = value ? '创建账号' : '欢迎回来';
+    submit.textContent = value ? '注册并登录' : '登录';
+    toggle.textContent = value ? '已有账号？登录' : '没有账号？注册';
+    username.minLength = value ? 3 : 1;
+    if (value) username.pattern = '[A-Za-z0-9_]+'; else username.removeAttribute('pattern');
+    password.minLength = value ? 10 : 1;
+    password.autocomplete = value ? 'new-password' : 'current-password';
+    login.querySelector<HTMLElement>('#username-hint')!.hidden = !value;
+    login.querySelector<HTMLElement>('#password-hint')!.hidden = !value;
+  }
+  function showError(error: unknown) {
+    dialog.error.textContent = error instanceof ControlError && error.status === 401 ? '账号或密码不正确，请重试。'
+      : error instanceof ControlError && error.status === 409 ? '账号或组织已存在，请换一个名称。'
+      : error instanceof ControlError && error.status >= 500 ? '服务暂时不可用，请稍后重试。'
+      : error instanceof Error ? error.message : '请求失败，请重试。';
+  }
   async function refresh() {
     try {
       const user = await control.request<{name: string}>('/api/v1/auth/me');
       const organizations = await control.selectDefaultOrganization();
       select.replaceChildren(new Option('选择组织', ''), ...organizations.map(org => new Option(org.data.name, org.id)));
       select.value = control.organization;
-      status.textContent = `${user.name} · ${control.organization ? '组织已选择' : '请选择或创建组织'}`;
-      login.hidden = true; create.hidden = false; logout.hidden = false;
-    } catch {
-      login.hidden = false; create.hidden = true; logout.hidden = true;
-      select.replaceChildren(new Option('请先登录', '')); status.textContent = '创建资源前请登录并选择组织。';
+      const organization = organizations.find(org => org.id === control.organization);
+      trigger.textContent = `${user.name}${organization ? ' · ' + organization.data.name : ' · 选择组织'}`;
+      trigger.setAttribute('aria-label', '账号与组织');
+      status.textContent = `已登录为 ${user.name}。${organization ? '当前组织：' + organization.data.name : '请选择或创建组织。'}`;
+      login.hidden = true; session.hidden = false; loggedIn = true;
+      dialog.title.textContent = '账号与组织';
+      dialog.description.textContent = '组织切换将结束当前组织下的活动会话。';
+      done.textContent = '完成';
+      return true;
+    } catch (error) {
+      if (!(error instanceof ControlError) || error.status !== 401) {
+        showError(error);
+        return false;
+      }
+      login.hidden = false; session.hidden = true; loggedIn = false;
+      trigger.textContent = options.registration ? '登录 / 注册' : '账号与组织';
+      trigger.removeAttribute('aria-label');
+      select.replaceChildren(new Option('请先登录', ''));
+      dialog.description.textContent = options.registration ? '登录后参与聊天、送礼和连麦。' : '创建资源前请登录并选择组织。';
+      registrationMode(registered);
+      done.textContent = '取消';
+      return true;
     }
   }
-  async function run(action: () => Promise<void>) {
-    if (busy) return; busy = true; panel.setAttribute('aria-busy', 'true');
-    panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.disabled = true);
-    try { await action(); await refresh(); changed(); }
-    catch (error) { status.textContent = error instanceof ControlError && error.status === 401 ? '账号或密码不正确，请重试。' : error instanceof Error ? error.message : '请求失败，请重试。'; }
-    finally { busy = false; panel.removeAttribute('aria-busy'); panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.disabled = false); }
+  async function run(action: () => Promise<void>, closeOnSuccess = false) {
+    if (busy) return;
+    busy = true; dialog.setBusy(true); dialog.error.textContent = '';
+    dialog.element.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, select, button').forEach(item => item.disabled = true);
+    try {
+      await action();
+      if (!await refresh()) return;
+      changed();
+      if (closeOnSuccess) dialog.element.close('success');
+    } catch (error) { showError(error); }
+    finally {
+      busy = false; dialog.setBusy(false);
+      dialog.element.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, select, button').forEach(item => item.disabled = false);
+    }
   }
-  login.onsubmit = event => { event.preventDefault(); const data = new FormData(login); void run(async () => { await control.request('/api/v1/auth/login', {name: data.get('name'), password: data.get('password')}); control.resetAccount(); (login.elements.namedItem('password') as HTMLInputElement).value = ''; }); };
-  create.onsubmit = event => { event.preventDefault(); const data = new FormData(create); void run(async () => { const organization = await control.request<{id: string}>('/api/v1/organizations', {name: data.get('organization')}); control.selectOrganization(organization.id); await control.request('organizations/initialize', {}); create.reset(); }); };
-  select.onchange = () => { control.selectOrganization(select.value); changed(); };
-  logout.onclick = () => void run(async () => { await control.request('/api/v1/auth/logout', {}); control.resetAccount(); });
-  panel.addEventListener('toggle', () => { if (panel.open && !busy) void refresh(); });
-  host.append(panel); void refresh().then(changed);
-  return panel;
+  login.onsubmit = event => {
+    event.preventDefault();
+    void run(async () => {
+      await control.request(`/api/v1/auth/${registered ? 'register' : 'login'}`, {name: username.value.trim(), password: password.value});
+      control.resetAccount(); password.value = '';
+    }, true);
+  };
+  toggle.onclick = () => registrationMode(!registered);
+  create.onsubmit = event => {
+    event.preventDefault(); const data = new FormData(create);
+    void run(async () => {
+      const organization = await control.request<{id: string}>('/api/v1/organizations', {name: data.get('organization')});
+      control.selectOrganization(organization.id);
+      await control.request('organizations/initialize', {}); create.reset();
+    });
+  };
+  select.onchange = () => { control.selectOrganization(select.value); changed(); void refresh(); };
+  logout.onclick = async () => {
+    if (!await confirmAction('退出账号？', '当前活动会话将结束，你可以稍后重新登录。', '退出账号')) return;
+    void run(async () => { await control.request('/api/v1/auth/logout', {}); control.resetAccount(); registered = false; });
+  };
+  const open = () => { dialog.open(loggedIn ? select : username); if (!busy) void refresh(); };
+  trigger.onclick = open;
+  void refresh().then(changed);
+  return {element: dialog.element, open, refresh};
 }

@@ -1,5 +1,6 @@
 #include "livekit/compat/algorithm.hpp"
 #include "window.hpp"
+#include <av/ui.hpp>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -9,12 +10,10 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
-#include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QInputDialog>
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
@@ -37,7 +36,16 @@ QPushButton* button(QString text, QString name, QWidget* parent = nullptr) {
   b->setObjectName(name);
   b->setMinimumHeight(36);
   b->setCursor(Qt::PointingHandCursor);
+  av::ui::set_button_role(b, name == "primary" ? av::ui::ButtonRole::Primary
+                             : name == "danger" ? av::ui::ButtonRole::Danger
+                                                : av::ui::ButtonRole::Secondary);
   return b;
+}
+
+QPushButton* add_cancel(av::ui::Dialog* dialog, const QString& text = "取消") {
+  auto* cancel = dialog->add_action(text);
+  QObject::connect(cancel, &QPushButton::clicked, dialog, &QDialog::reject);
+  return cancel;
 }
 
 // Self-drawn brand mark: no third-party logo or artwork is shipped.
@@ -45,7 +53,7 @@ QLabel* brand_mark(int size = 34) {
   auto* l = new QLabel("AV");
   l->setAlignment(Qt::AlignCenter);
   l->setFixedSize(size, size);
-  l->setStyleSheet(QString("background:#006eff;color:#ffffff;border-radius:%1px;"
+  l->setStyleSheet(QString("background:#2563eb;color:#ffffff;border-radius:%1px;"
                            "font-size:%2px;font-weight:600;")
                        .arg(size / 4)
                        .arg(size > 30 ? 13 : 10));
@@ -56,6 +64,14 @@ QLabel* label(QString text, QString name = {}) {
   auto* l = new QLabel(text);
   l->setObjectName(name);
   l->setWordWrap(true);
+  if (name == "heading") {
+    av::ui::set_text_role(l, "title");
+  } else if (name == "sectionTitle" || name == "brand") {
+    av::ui::set_text_role(l, "heading");
+  } else if (name == "subtle" || name == "meetingSubtle" || name == "meetingNumber" ||
+             name == "memberCount") {
+    av::ui::set_text_role(l, "muted");
+  }
   return l;
 }
 
@@ -96,13 +112,14 @@ QString spacedNumber(QString number) {
 Window::Window(bool running) : running_(running) {
   setObjectName("conferenceWindow");
   setWindowTitle("AV 会议");
-  resize(1000, 680);
+  resize(1100, 740);
   setMinimumSize(820, 560);
   QSettings prefs;
   api_.base = prefs.value("server", "http://127.0.0.1:8080").toString();
   cameraIndex_ = prefs.value("camera", 0).toInt();
   if (running_)
     restoreGeometry(prefs.value("geometry").toByteArray());
+  av::ui::apply_theme(this, av::ui::Theme::Light);
   setStyleSheet(ui::style_sheet());
 
   // Qt only paints stylesheet backgrounds for plain QWidgets when this flag
@@ -111,6 +128,16 @@ Window::Window(bool running) : running_(running) {
     auto* w = new QWidget;
     w->setObjectName(name);
     w->setAttribute(Qt::WA_StyledBackground, true);
+    if (name == "listCard" || name == "waitingCard") {
+      av::ui::set_surface(w);
+    } else if (name == "navRail") {
+      av::ui::set_surface(w, "sidebar");
+    } else if (name == "meetingTopBar") {
+      av::ui::set_surface(w, "toolbar");
+    } else if (name == "videoStage" || name == "meetingToolbar") {
+      av::ui::apply_theme(w, av::ui::Theme::Dark);
+      av::ui::set_surface(w, name == "videoStage" ? "media" : "toolbar");
+    }
     return w;
   };
   auto* root = new QWidget;
@@ -130,7 +157,7 @@ Window::Window(bool running) : running_(running) {
   home->setContentsMargins(0, 0, 0, 0);
   home->setSpacing(0);
   auto* rail = surface("navRail");
-  rail->setFixedWidth(72);
+  rail->setFixedWidth(80);
   auto* railLayout = new QVBoxLayout(rail);
   railLayout->setContentsMargins(0, 14, 6, 14);
   railLayout->setSpacing(4);
@@ -149,8 +176,8 @@ Window::Window(bool running) : running_(running) {
 
   auto* content = new QWidget;
   auto* c = new QVBoxLayout(content);
-  c->setContentsMargins(30, 22, 30, 18);
-  c->setSpacing(12);
+  c->setContentsMargins(24, 24, 24, 20);
+  c->setSpacing(16);
   auto* headline = new QHBoxLayout;
   headline->addWidget(label("AV 会议", "brand"));
   headline->addStretch(1);
@@ -160,19 +187,28 @@ Window::Window(bool running) : running_(running) {
   headline->addWidget(label(QDateTime::currentDateTime().toString("M月d日"), "subtle"));
   c->addLayout(headline);
   c->addSpacing(2);
-  c->addWidget(label("你好，欢迎回来", "heading"));
-  c->addWidget(label("发起或加入一场会议，与团队保持连接。", "subtle"));
-  auto* actions = new QHBoxLayout;
-  actions->setSpacing(16);
+  c->addWidget(label("让每一次交流，更进一步", "heading"));
+  c->addWidget(label("连接团队、分享想法，从这里开始。", "subtle"));
+  auto* workspace = new QHBoxLayout;
+  workspace->setSpacing(20);
+  auto* launchPanel = new QWidget;
+  launchPanel->setObjectName("meetingLaunchPanel");
+  launchPanel->setFixedWidth(224);
+  auto* actions = new QVBoxLayout(launchPanel);
+  actions->setContentsMargins(0, 0, 0, 0);
+  actions->setSpacing(12);
+  actions->addWidget(label("开始交流", "sectionTitle"));
   auto* add = new ui::ActionCard("加入会议", ui::Glyph::Plus, true);
   add->setObjectName("joinButton");
   auto* quick = new ui::ActionCard("快速会议", ui::Glyph::Video, false);
   quick->setObjectName("quickButton");
   auto* plan = new ui::ActionCard("预定会议", ui::Glyph::Calendar, false);
   plan->setObjectName("scheduleButton");
-  for (auto* b : {add, quick, plan})
-    actions->addWidget(b, 1);
-  c->addLayout(actions);
+  for (auto* b : {add, quick, plan}) {
+    actions->addWidget(b);
+  }
+  actions->addStretch(1);
+  workspace->addWidget(launchPanel);
   connect(add, &QPushButton::clicked, this, &Window::joinDialog);
   connect(plan, &QPushButton::clicked, this, [this] { schedule(); });
   connect(quick, &QPushButton::clicked, this, [this] {
@@ -191,7 +227,12 @@ Window::Window(bool running) : running_(running) {
                         {});
                  });
   });
-  c->addWidget(label("会议列表", "sectionTitle"));
+  auto* agenda = surface("listCard");
+  auto* agendaLayout = new QVBoxLayout(agenda);
+  agendaLayout->setContentsMargins(20, 18, 20, 16);
+  agendaLayout->setSpacing(12);
+  agendaLayout->addWidget(label("我的会议", "sectionTitle"));
+  agendaLayout->addWidget(label("查看日程，继续与团队的交流", "subtle"));
   homeTabs_ = new QTabWidget;
   homeTabs_->setObjectName("homeTabs");
   upcoming_ = new QListWidget;
@@ -202,8 +243,10 @@ Window::Window(bool running) : running_(running) {
   history_->addItem("暂无历史会议");
   homeTabs_->addTab(upcoming_, "即将开始");
   homeTabs_->addTab(history_, "历史会议");
-  c->addWidget(homeTabs_, 1);
-  c->addWidget(label("默认不开启摄像头和麦克风 · 单场会议最多 25 人", "subtle"));
+  agendaLayout->addWidget(homeTabs_, 1);
+  workspace->addWidget(agenda, 1);
+  c->addLayout(workspace, 1);
+  c->addWidget(label("默认关闭摄像头和麦克风 · 单场会议最多 25 人", "subtle"));
   home->addWidget(content, 1);
   navMeetings->set_selected(true);
   connect(navMeetings, &QPushButton::clicked, this, [this, navMeetings, navHistory] {
@@ -233,7 +276,7 @@ Window::Window(bool running) : running_(running) {
   cv->setSpacing(12);
   auto* waitIcon = new QLabel;
   waitIcon->setPixmap(
-      ui::glyph(ui::Glyph::Shield, QColor("#006eff"), 48).pixmap(QSize(48, 48)));
+      ui::glyph(ui::Glyph::Shield, QColor("#2563eb"), 48).pixmap(QSize(48, 48)));
   waitIcon->setFixedHeight(56);
   waitIcon->setAlignment(Qt::AlignCenter);
   cv->addWidget(waitIcon, 0, Qt::AlignHCenter);
@@ -312,10 +355,12 @@ Window::Window(bool running) : running_(running) {
   auto* prev = button({}, "previousPage");
   prev->setToolTip("上一页");
   prev->setFixedSize(28, 28);
+  prev->setStyleSheet("padding:0; min-height:0;");
   prev->setIcon(ui::glyph(ui::Glyph::ChevronLeft, QColor("#e7e9ee"), 18));
   auto* next = button({}, "nextPage");
   next->setToolTip("下一页");
   next->setFixedSize(28, 28);
+  next->setStyleSheet("padding:0; min-height:0;");
   next->setIcon(ui::glyph(ui::Glyph::ChevronRight, QColor("#e7e9ee"), 18));
   pageLabel_ = label("1 / 1", "pageLabel");
   pagination->addWidget(prev);
@@ -352,6 +397,7 @@ Window::Window(bool running) : running_(running) {
   chatInput_->setPlaceholderText("发送给所有人，Ctrl+Enter 发送");
   chatInput_->setFixedHeight(72);
   auto* send = button("发送", "sendChat");
+  av::ui::set_button_role(send, av::ui::ButtonRole::Primary);
   auto* sendRow = new QHBoxLayout;
   sendRow->addStretch(1);
   sendRow->addWidget(send);
@@ -462,7 +508,7 @@ void Window::showHome() {
 
 void Window::login() {
   if (!api_.token.isEmpty()) {
-    if (QMessageBox::question(this, "退出登录", "退出当前账号？") == QMessageBox::Yes) {
+    if (av::ui::MessageBox::question(this, "退出登录", "退出当前账号？") == QMessageBox::Yes) {
       api_.request("/api/v1/auth/logout", {}, [this](QJsonValue, QString e) {
         if (!e.isEmpty()) {
           message(e);
@@ -478,10 +524,14 @@ void Window::login() {
     }
     return;
   }
-  auto* d = new QDialog(this);
+  auto* d = new av::ui::Dialog(this, "登录 AV 会议");
   d->setAttribute(Qt::WA_DeleteOnClose);
-  d->setWindowTitle("登录 AV 会议");
-  auto* form = new QFormLayout(d);
+  connect(d, &QDialog::rejected, this, [this] { api_.cancel(); });
+  auto* form = new QFormLayout;
+  form->setSpacing(12);
+  form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  d->content_layout()->addLayout(form);
   auto* name = new QLineEdit;
   name->setObjectName("loginName");
   auto* password = new QLineEdit;
@@ -493,19 +543,26 @@ void Window::login() {
   form->addRow("用户名", name);
   form->addRow("密码", password);
   form->addRow(status);
-  form->addRow(submit, reg);
+  add_cancel(d);
+  d->button_layout()->addWidget(reg);
+  d->button_layout()->addWidget(submit);
   auto run = [this, d, name, password, status, submit, reg](QString action) {
     submit->setEnabled(false);
     reg->setEnabled(false);
-    QPointer<QDialog> guard = d;
+    d->body()->setEnabled(false);
+    d->set_error({});
+    status->setText("正在验证账号…");
+    QPointer<av::ui::Dialog> guard = d;
     api_.request("/api/v1/auth/" + action, {{"name", name->text()}, {"password", password->text()}},
                  [this, guard, status, submit, reg](QJsonValue v, QString e) {
-                   if (!guard)
+                   if (!guard || !guard->isVisible())
                      return;
+                   guard->body()->setEnabled(true);
                    submit->setEnabled(true);
                    reg->setEnabled(true);
+                   status->setText("用户名 3–32 位，密码至少 10 字节");
                    if (!e.isEmpty()) {
-                     status->setText(e);
+                     guard->set_error(e);
                      return;
                    }
                    api_.token = v.toObject().value("session_token").toString();
@@ -525,7 +582,7 @@ void Window::login() {
                          const auto organizations = list.toObject().value("items").toArray();
                          if (organizations.isEmpty()) {
                            bool accepted = false;
-                           const auto name = QInputDialog::getText(
+                           const auto name = av::ui::InputDialog::getText(
                                this, "创建组织", "组织名称", QLineEdit::Normal, {}, &accepted);
                            if (!accepted || name.trimmed().isEmpty()) {
                              message("创建会议前需要先加入或创建组织");
@@ -559,7 +616,7 @@ void Window::login() {
                                           " ? " + item.value("id").toString());
                            }
                            bool accepted = false;
-                           const auto selected = QInputDialog::getItem(
+                           const auto selected = av::ui::InputDialog::getItem(
                                this, "选择组织", "请选择当前组织", names, 0, false, &accepted);
                            if (!accepted) {
                              message("请先选择一个组织");
@@ -595,10 +652,13 @@ void Window::refreshDevices() {
 }
 
 void Window::settings() {
-  auto* d = new QDialog(this);
-  d->setWindowTitle("设置");
+  auto* d = new av::ui::Dialog(this, "会议设置", "管理连接和音视频设备。");
   d->setAttribute(Qt::WA_DeleteOnClose);
-  auto* form = new QFormLayout(d);
+  auto* form = new QFormLayout;
+  form->setSpacing(12);
+  form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  d->content_layout()->addLayout(form);
   auto* server = new QLineEdit(api_.base);
   server->setObjectName("serverAddress");
   server->setEnabled(meetingId_.isEmpty());
@@ -618,13 +678,17 @@ void Window::settings() {
   });
   form->addRow(label("麦克风与扬声器使用系统默认设备。"));
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-  form->addRow(buttons);
+  buttons->button(QDialogButtonBox::Save)->setText("保存");
+  buttons->button(QDialogButtonBox::Cancel)->setText("取消");
+  d->button_layout()->addWidget(buttons);
+  av::ui::set_button_role(buttons->button(QDialogButtonBox::Save), av::ui::ButtonRole::Primary);
   connect(buttons, &QDialogButtonBox::rejected, d, &QDialog::reject);
   connect(buttons, &QDialogButtonBox::accepted, d, [this, d, server, devices] {
     QUrl url(server->text().trimmed());
     if (!url.isValid() || (url.scheme() != "http" && url.scheme() != "https") ||
         url.host().isEmpty() || !url.userInfo().isEmpty()) {
-      QMessageBox::warning(d, "地址无效", "请输入有效的 HTTP/HTTPS 服务地址");
+      d->set_error("请输入有效的 HTTP/HTTPS 服务地址");
+      server->setFocus();
       return;
     }
     auto base = server->text().trimmed();
@@ -689,10 +753,13 @@ void Window::schedule(QJsonObject existing) {
     login();
     return;
   }
-  auto* d = new QDialog(this);
+  auto* d = new av::ui::Dialog(this, existing.isEmpty() ? "预定会议" : "编辑预约");
   d->setAttribute(Qt::WA_DeleteOnClose);
-  d->setWindowTitle(existing.isEmpty() ? "预定会议" : "编辑预约");
-  auto* form = new QFormLayout(d);
+  auto* form = new QFormLayout;
+  form->setSpacing(12);
+  form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  d->content_layout()->addLayout(form);
   auto* title = new QLineEdit(existing.value("title").toString());
   title->setObjectName("scheduleTitle");
   title->setMaxLength(100);
@@ -718,14 +785,19 @@ void Window::schedule(QJsonObject existing) {
   form->addRow("会议密码", password);
   form->addRow(waiting);
   form->addRow(status);
-  form->addRow(save);
+  add_cancel(d);
+  d->button_layout()->addWidget(save);
   connect(save, &QPushButton::clicked, d,
           [this, d, title, time, duration, password, waiting, status, save, existing] {
             if (title->text().trimmed().isEmpty()) {
-              status->setText("请填写会议主题");
+              d->set_error("请填写会议主题");
+              title->setFocus();
               return;
             }
             save->setEnabled(false);
+            d->set_busy(true);
+            d->set_error({});
+            status->setText("正在保存预约…");
             QJsonObject data{{"title", title->text().trimmed()},
                              {"starts_at", time->dateTime().toUTC().toString(Qt::ISODate)},
                              {"duration_minutes", duration->value()},
@@ -735,13 +807,15 @@ void Window::schedule(QJsonObject existing) {
             auto url = existing.isEmpty() ? QString("/api/v1/conference/meetings")
                                           : QString("/api/v1/conference/meetings/") +
                                                 existing.value("id").toString() + "/edit";
-            QPointer<QDialog> guard = d;
+            QPointer<av::ui::Dialog> guard = d;
             api_.request(url, data, [this, guard, status, save](QJsonValue, QString e) {
-              if (!guard)
+              if (!guard || !guard->isVisible())
                 return;
+              guard->set_busy(false);
               save->setEnabled(true);
+              status->clear();
               if (!e.isEmpty()) {
-                status->setText(e);
+                guard->set_error(e);
                 return;
               }
               guard->accept();
@@ -752,10 +826,13 @@ void Window::schedule(QJsonObject existing) {
 }
 
 void Window::joinDialog() {
-  auto* d = new QDialog(this);
+  auto* d = new av::ui::Dialog(this, "加入会议");
   d->setAttribute(Qt::WA_DeleteOnClose);
-  d->setWindowTitle("加入会议");
-  auto* form = new QFormLayout(d);
+  auto* form = new QFormLayout;
+  form->setSpacing(12);
+  form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+  d->content_layout()->addLayout(form);
   auto* number = new QLineEdit;
   number->setObjectName("meetingNumber");
   number->setPlaceholderText("会议号或邀请文本");
@@ -787,29 +864,57 @@ void Window::joinDialog() {
   form->addRow("摄像头", cameras);
   form->addRow(refresh);
   form->addRow(status);
-  form->addRow(submit);
+  add_cancel(d);
+  d->button_layout()->addWidget(submit);
+  connect(d, &QDialog::rejected, this, [this, d] {
+    if (d->property("joining").toBool()) {
+      api_.cancel();
+      showHome();
+    }
+  });
   connect(submit, &QPushButton::clicked, d,
-          [this, d, number, name, password, mic, camera, cameras, status] {
+          [this, d, number, name, password, mic, camera, cameras, status, submit] {
             auto n = numberFrom(number->text());
             if (n.isEmpty() || name->text().trimmed().isEmpty()) {
-              status->setText("请填写九位会议号和昵称");
+              d->set_error("请填写九位会议号和昵称");
+              (n.isEmpty() ? number : name)->setFocus();
               return;
             }
             if (camera->isChecked() && cameras->currentIndex() < 0) {
-              status->setText("请先选择摄像头");
+              d->set_error("请先选择摄像头");
+              cameras->setFocus();
               return;
             }
             wantMic_ = mic->isChecked();
             wantCamera_ = camera->isChecked();
             cameraIndex_ = std::max(0, cameras->currentIndex());
             auto display = name->text().trimmed(), pass = password->text();
-            d->accept();
-            join(n, display, pass);
+            d->setProperty("joining", true);
+            d->set_error({});
+            d->body()->setEnabled(false);
+            submit->setEnabled(false);
+            status->setText("正在提交入会申请…");
+            QPointer<av::ui::Dialog> guard = d;
+            join(n, display, pass, [guard, submit, status](QString error) {
+              if (!guard || !guard->isVisible()) {
+                return;
+              }
+              guard->setProperty("joining", false);
+              guard->body()->setEnabled(true);
+              submit->setEnabled(true);
+              status->clear();
+              if (!error.isEmpty()) {
+                guard->set_error(error);
+                return;
+              }
+              guard->accept();
+            });
           });
   d->open();
 }
 
-void Window::join(QString number, QString name, QString password) {
+void Window::join(QString number, QString name, QString password,
+                  std::function<void(QString)> on_complete) {
   message({});
   api_.cancel();
   api_.guest.clear();
@@ -819,8 +924,11 @@ void Window::join(QString number, QString name, QString password) {
   waitingText_->setText("正在提交入会申请…");
   api_.request("/api/v1/conference/join",
                {{"number", number}, {"name", name}, {"password", password}},
-               [this](QJsonValue v, QString e) {
+               [this, on_complete = std::move(on_complete)](QJsonValue v, QString e) {
                  if (!e.isEmpty()) {
+                   if (on_complete) {
+                     on_complete(e);
+                   }
                    message(e);
                    showHome();
                    return;
@@ -829,6 +937,9 @@ void Window::join(QString number, QString name, QString password) {
                  business_ = {};
                  lastUnmute_ = 0;
                  videoPage_ = 0;
+                 if (on_complete) {
+                   on_complete({});
+                 }
                  poll();
                });
 }
@@ -904,7 +1015,7 @@ void Window::applyBusiness(QJsonObject state) {
       if (request > lastUnmute_) {
         lastUnmute_ = request;
         if (running_ &&
-            QMessageBox::question(this, "主持人请求", "主持人邀请你开启麦克风，是否开启？") ==
+            av::ui::MessageBox::question(this, "主持人请求", "主持人邀请你开启麦克风，是否开启？") ==
                 QMessageBox::Yes) {
           wantMic_ = true;
           bool found = false;
@@ -1288,16 +1399,28 @@ void Window::leave(bool end, bool closeAfter) {
     return;
   }
   if (isHost() && business_.value("state") == "active" && !end) {
-    QMessageBox box(QMessageBox::Question, "离开会议", "主持人离会前，请转让主持人或结束会议。",
-                    QMessageBox::Cancel, this);
-    auto* transfer = box.addButton("转让后离开", QMessageBox::ActionRole);
-    auto* finish = box.addButton("结束会议", QMessageBox::DestructiveRole);
+    av::ui::Dialog box(this, "离开会议", "主持人离会前，请转让主持人或结束会议。");
+    auto* cancel = add_cancel(&box);
+    auto* transfer = box.add_action("转让后离开", av::ui::ButtonRole::Primary);
+    auto* finish = box.add_action("结束会议", av::ui::ButtonRole::Danger);
+    enum class Choice { Cancel, Transfer, Finish };
+    Choice choice = Choice::Cancel;
+    connect(transfer, &QPushButton::clicked, &box, [&] {
+      choice = Choice::Transfer;
+      box.accept();
+    });
+    connect(finish, &QPushButton::clicked, &box, [&] {
+      choice = Choice::Finish;
+      box.accept();
+    });
+    cancel->setDefault(true);
+    cancel->setFocus();
     box.exec();
-    if (box.clickedButton() == finish) {
+    if (choice == Choice::Finish) {
       leave(true, closeAfter);
       return;
     }
-    if (box.clickedButton() == transfer) {
+    if (choice == Choice::Transfer) {
       QMenu menu(this);
       for (auto v : business_.value("members").toArray()) {
         auto p = v.toObject();
@@ -1318,9 +1441,11 @@ void Window::leave(bool end, bool closeAfter) {
     }
     return;
   }
-  if (end && QMessageBox::question(this, "结束会议", "结束后所有成员将离开会议，确定结束？") !=
-                 QMessageBox::Yes)
+  if (end && av::ui::MessageBox::warning(this, "结束会议", "结束后所有成员将离开会议，确定结束？",
+                                       QMessageBox::Yes | QMessageBox::No, QMessageBox::No) !=
+                 QMessageBox::Yes) {
     return;
+  }
   command(end ? "end" : "leave", {}, finishLeaving);
 }
 
@@ -1385,10 +1510,9 @@ void Window::showDetails(QListWidget* list) {
   auto m = item->data(Qt::UserRole).toJsonObject();
   if (m.isEmpty())
     return;
-  auto* d = new QDialog(this);
+  auto* d = new av::ui::Dialog(this, "会议详情");
   d->setAttribute(Qt::WA_DeleteOnClose);
-  d->setWindowTitle("会议详情");
-  auto* l = new QVBoxLayout(d);
+  auto* l = d->content_layout();
   l->addWidget(label(m.value("title").toString(), "heading"));
   l->addWidget(label("会议号：" + m.value("number").toString() + "\n时间：" +
                      timeText(m.value("starts_at").toString()) + "\n状态：" +
@@ -1433,8 +1557,11 @@ void Window::showDetails(QListWidget* list) {
       schedule(m);
     });
     connect(cancel, &QPushButton::clicked, d, [this, d, m] {
-      if (QMessageBox::question(d, "取消预约", "确认取消这场预约？") != QMessageBox::Yes)
+      if (av::ui::MessageBox::warning(d, "取消预约", "确认取消这场预约？",
+                                      QMessageBox::Yes | QMessageBox::No, QMessageBox::No) !=
+          QMessageBox::Yes) {
         return;
+      }
       api_.request("/api/v1/conference/meetings/" + m.value("id").toString() + "/cancel", {},
                    [this](QJsonValue, QString e) {
                      message(e);
@@ -1443,6 +1570,7 @@ void Window::showDetails(QListWidget* list) {
       d->accept();
     });
   }
+  add_cancel(d, "关闭");
   d->open();
 }
 }  // namespace meeting

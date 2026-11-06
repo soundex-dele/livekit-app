@@ -28,13 +28,16 @@ if(NOT TARGET LiveKit::MediaEngine)
   add_subdirectory("${AV_SDK_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/sdk")
 endif()
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Network)
+if(NOT TARGET av_ui_qt)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../packages/native/qt" "${CMAKE_BINARY_DIR}/av_ui_qt")
+endif()
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 add_library(livekit_demo_session STATIC session.cpp session_runtime.cpp chat.cpp)
 target_include_directories(livekit_demo_session PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(livekit_demo_session PUBLIC LiveKit::MediaEngine LiveKit::ServerSDK)
 add_library(av_meeting_widgets STATIC qt/api.cpp qt/api.hpp qt/theme.cpp qt/theme.hpp qt/video_widget.cpp qt/video_widget.hpp qt/window.cpp qt/window.hpp)
-target_link_libraries(av_meeting_widgets PUBLIC livekit_demo_session Qt6::Widgets Qt6::Network)
+target_link_libraries(av_meeting_widgets PUBLIC livekit_demo_session Qt6::Widgets Qt6::Network av_ui_qt)
 # Deploy beside build-tree executables too, so launching them does not depend
 # on a developer's PATH or on running the separate install/package step.
 function(av_meeting_deploy_qt target)
@@ -115,6 +118,9 @@ if(BUILD_TESTING)
   av_meeting_deploy_qt(livekit_demo_tests)
   add_test(NAME conference_widgets COMMAND livekit_demo_tests)
   set_tests_properties(conference_widgets PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  add_test(NAME conference_widgets_hidpi COMMAND livekit_demo_tests)
+  set_tests_properties(conference_widgets_hidpi PROPERTIES TIMEOUT 60
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2")
   if(WIN32)
     add_custom_command(TARGET livekit_demo_tests POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:livekit_demo_tests>/platforms"

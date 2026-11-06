@@ -1,5 +1,6 @@
 #include "../qt/window.hpp"
 #include <QDir>
+#include <QDialog>
 #include <QComboBox>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -168,6 +169,158 @@ class MeetingTests : public QObject {
     state["state"] = "ended";
     window.applyBusiness(state);
     QCOMPARE(pages->currentWidget()->objectName(), QString("homePage"));
+    window.close();
+  }
+
+  void dialogsAndCompactWorkspace() {
+    meeting::Window window(false);
+    window.resize(820, 560);
+    window.show();
+    QTest::qWait(20);
+    QCOMPARE(window.size(), QSize(820, 560));
+    auto* launch = window.findChild<QWidget*>("meetingLaunchPanel");
+    auto* agenda = window.findChild<QWidget*>("listCard");
+    QVERIFY(launch && agenda);
+    QVERIFY(launch->geometry().right() < agenda->geometry().left());
+    QVERIFY(window.findChild<QPushButton*>("scheduleButton")->isVisible());
+
+    const auto capture = [](QWidget* widget, const QString& name) {
+      const auto dir = qEnvironmentVariable("AV_MEETING_SCREENSHOT_DIR");
+      if (dir.isEmpty()) {
+        return;
+      }
+      QDir().mkpath(dir);
+      QImage image(widget->size() * widget->devicePixelRatioF(),
+                   QImage::Format_ARGB32_Premultiplied);
+      image.setDevicePixelRatio(widget->devicePixelRatioF());
+      image.fill(Qt::transparent);
+      widget->render(&image);
+      QVERIFY(image.save(dir + "/" + name + ".png"));
+    };
+    for (const auto& entry : {qMakePair("joinButton", "join-dialog"),
+                              qMakePair("settingsButton", "settings-dialog"),
+                              qMakePair("accountButton", "account-dialog")}) {
+      auto* trigger = window.findChild<QPushButton*>(entry.first);
+      QVERIFY(trigger);
+      trigger->setFocus();
+      trigger->click();
+      QTest::qWait(20);
+      QPointer<QDialog> dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+      QVERIFY(dialog);
+      QVERIFY(dialog->isVisible());
+      QVERIFY(dialog->width() >= 360);
+      capture(dialog, entry.second);
+      if (QString(entry.first) == "joinButton") {
+        dialog->findChild<QPushButton*>("primary")->click();
+        QVERIFY(dialog->isVisible());
+        QVERIFY(dialog->findChild<QLineEdit*>("meetingNumber")->text().isEmpty());
+        capture(dialog, "join-dialog-error");
+      }
+      QTest::keyClick(dialog, Qt::Key_Escape);
+      QTRY_VERIFY(dialog.isNull() || !dialog->isVisible());
+    }
+    capture(&window, "home-compact");
+  }
+
+  void failedJoinPreservesFormAndCancellation() {
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QTemporaryDir settings;
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    QSettings prefs;
+    prefs.setValue("server", QString("http://127.0.0.1:%1").arg(server.serverPort()));
+    meeting::Window window(false);
+    window.show();
+    window.findChild<QPushButton*>("joinButton")->click();
+    auto* number = window.findChild<QLineEdit*>("meetingNumber");
+    auto* name = window.findChild<QLineEdit*>("displayName");
+    QVERIFY(number && name);
+    QPointer<QDialog> dialog = qobject_cast<QDialog*>(number->window());
+    QVERIFY(dialog);
+    number->setText("123456789");
+    name->setText(QStringLiteral("测试参会者"));
+    auto* submit = dialog->findChild<QPushButton*>("primary");
+    submit->click();
+    QVERIFY(!submit->isEnabled());
+    submit->click();
+    QTRY_VERIFY(server.hasPendingConnections());
+    auto* failed = server.nextPendingConnection();
+    QTRY_VERIFY(failed->bytesAvailable() > 0);
+    failed->readAll();
+    const QByteArray body = R"({"error":"incorrect_password"})";
+    failed->write("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n"
+                  "Content-Length: " + QByteArray::number(body.size()) +
+                  "\r\nConnection: close\r\n\r\n" + body);
+    failed->disconnectFromHost();
+    QTRY_VERIFY(submit->isEnabled());
+    QVERIFY(dialog->isVisible());
+    QCOMPARE(number->text(), QString("123456789"));
+    QCOMPARE(name->text(), QStringLiteral("测试参会者"));
+    auto* error = dialog->findChild<QLabel*>("avDialogError");
+    QVERIFY(error && error->isVisible());
+    QVERIFY(error->text().contains(QStringLiteral("密码")));
+    QVERIFY(!server.hasPendingConnections());
+    failed->deleteLater();
+
+    submit->click();
+    QTRY_VERIFY(server.hasPendingConnections());
+    auto* cancelled = server.nextPendingConnection();
+    QTRY_VERIFY(cancelled->bytesAvailable() > 0);
+    QTest::keyClick(dialog, Qt::Key_Escape);
+    QTRY_VERIFY(dialog.isNull());
+    QTRY_COMPARE(cancelled->state(), QAbstractSocket::UnconnectedState);
+    QCOMPARE(window.findChild<QStackedWidget*>()->currentWidget()->objectName(),
+             QString("homePage"));
+    cancelled->deleteLater();
+    window.close();
+  }
+
+  void hostLeaveActionsFitAndCancel() {
+    meeting::Window window(false);
+    window.show();
+    window.applyBusiness(QJsonObject{{"id", "leave-test"},
+                                    {"title", "主持人离会测试"},
+                                    {"number", "123456789"},
+                                    {"state", "active"},
+                                    {"status", "approved"},
+                                    {"self", "host"},
+                                    {"host", "host"},
+                                    {"members", QJsonArray{}}});
+    QTimer::singleShot(0, &window, [&] {
+      auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+      QVERIFY(dialog);
+      QTimer::singleShot(1000, dialog, &QDialog::reject);
+      QTest::qWait(20);
+      QStringList actions;
+      for (auto* button : dialog->findChildren<QPushButton*>()) {
+        actions.append(button->text());
+        QVERIFY(button->isVisible());
+        const QRect bounds(button->mapTo(dialog, QPoint()), button->size());
+        QVERIFY2(dialog->rect().contains(bounds), qPrintable(button->text()));
+        if (button->text() == QStringLiteral("取消")) {
+          QVERIFY(button->isDefault());
+        }
+      }
+      QVERIFY(actions.contains(QStringLiteral("取消")));
+      QVERIFY(actions.contains(QStringLiteral("转让后离开")));
+      QVERIFY(actions.contains(QStringLiteral("结束会议")));
+      const auto dir = qEnvironmentVariable("AV_MEETING_SCREENSHOT_DIR");
+      if (!dir.isEmpty()) {
+        QDir().mkpath(dir);
+        QImage image(dialog->size() * dialog->devicePixelRatioF(),
+                     QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(dialog->devicePixelRatioF());
+        image.fill(Qt::transparent);
+        dialog->render(&image);
+        QVERIFY(image.save(dir + "/host-leave-dialog.png"));
+      }
+      QTest::keyClick(dialog, Qt::Key_Escape);
+    });
+    window.findChild<QPushButton*>("leaveButton")->click();
+    QVERIFY(!QApplication::activeModalWidget());
+    QCOMPARE(window.findChild<QStackedWidget*>()->currentWidget()->objectName(),
+             QString("meetingPage"));
     window.close();
   }
 

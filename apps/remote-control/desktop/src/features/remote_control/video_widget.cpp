@@ -258,7 +258,7 @@ std::optional<QPointF> VideoWidget::point(QPointF p) const {
 
 void VideoWidget::paintEvent(QPaintEvent*) {
   QPainter p(this);
-  p.fillRect(rect(), QColor("#172033"));
+  p.fillRect(rect(), QColor("#0B1220"));
   if (image_.isNull()) {
     p.setPen(QColor("#cbd5e1"));
     p.drawText(rect(), Qt::AlignCenter, "等待远程画面…");

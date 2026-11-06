@@ -3,12 +3,14 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTemporaryDir>
+#include <QTabWidget>
 #include <QTimer>
 #include <QtTest>
 
@@ -129,6 +131,56 @@ class WidgetsTest : public QObject {
                                return media.preview && media.preview->width == 1280;
                              })(),
                              10000);
+  }
+
+  void workspaceAndDialogs() {
+    QTemporaryDir directory;
+    Window window({std::filesystem::u8path(directory.path().toStdString()), true, false});
+    window.resize(1080, 700);
+    window.show();
+    QTRY_VERIFY_WITH_TIMEOUT(window.mediaSnapshot().frames > 0, 10000);
+    auto* tabs = window.findChild<QTabWidget*>("inspectorTabs");
+    QVERIFY(tabs);
+    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->tabText(0), QStringLiteral("素材属性"));
+    QCOMPARE(tabs->tabText(1), QStringLiteral("直播互动"));
+    auto* preview = window.findChild<QWidget*>("preview");
+    auto* mixer = window.findChild<QWidget*>("audioMixer");
+    QVERIFY(preview && mixer);
+    QVERIFY(preview->width() >= 280);
+    QVERIFY(preview->height() >= 200);
+    QVERIFY(preview->mapTo(&window, preview->rect().bottomLeft()).y() <
+            mixer->mapTo(&window, QPoint()).y());
+    const auto capture = [](QWidget* widget, const QString& name) {
+      const auto dir = qEnvironmentVariable("AV_STUDIO_SCREENSHOT_DIR");
+      if (dir.isEmpty()) {
+        return;
+      }
+      QDir().mkpath(dir);
+      QImage image(widget->size() * widget->devicePixelRatioF(),
+                   QImage::Format_ARGB32_Premultiplied);
+      image.setDevicePixelRatio(widget->devicePixelRatioF());
+      image.fill(Qt::transparent);
+      widget->render(&image);
+      QVERIFY(image.save(dir + "/" + name + ".png"));
+    };
+    capture(&window, "workspace-compact");
+    tabs->setCurrentIndex(1);
+    capture(&window, "workspace-interaction");
+    for (const auto& entry : {qMakePair("addSource", "source-dialog"),
+                              qMakePair("account", "account-dialog")}) {
+      QTimer::singleShot(0, &window, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        QVERIFY(dialog);
+        QTest::qWait(20);
+        capture(dialog, entry.second);
+        QTest::keyClick(dialog, Qt::Key_Escape);
+      });
+      auto* trigger = window.findChild<QPushButton*>(entry.first);
+      QVERIFY(trigger);
+      trigger->click();
+      QVERIFY(!QApplication::activeModalWidget());
+    }
   }
 };
 

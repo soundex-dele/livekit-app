@@ -49,6 +49,7 @@ class Window final : public QMainWindow {
 
  protected:
   void closeEvent(QCloseEvent*) override;
+  void resizeEvent(QResizeEvent*) override;
 
  private:
   void updateControls();
@@ -58,6 +59,7 @@ class Window final : public QMainWindow {
   QListWidget* displays_;
   QStackedWidget* pages_;
   Preview* preview_;
+  QWidget* sidebar_ = nullptr;
   std::vector<livekit::sdk::ScreenCaptureDevice> devices_;
   bool busy_ = false, enumerating_ = false, closing_ = false, allowClose_ = false;
 };

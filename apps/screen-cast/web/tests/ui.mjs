@@ -1,29 +1,56 @@
-// Layout/state fixtures only. Real media decoding is covered by integration.mjs.
 import { chromium } from 'playwright';
-import { createServer } from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { resolve, extname } from 'node:path';
 import assert from 'node:assert/strict';
-const dist=resolve('dist'), output=resolve('../../../out/screen-cast-web-ui');await mkdir(output,{recursive:true});
-const server=createServer(async(req,res)=>{try{const path=req.url.split('?')[0].replace(/^\/apps\/screen-cast/, '')||'/';const file=resolve(dist,'.'+(path==='/'?'/index.html':path));if(!file.startsWith(dist+'/')){res.writeHead(403);res.end();return;}const data=await readFile(file);res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[extname(file)]||'application/octet-stream');res.end(data);}catch{res.writeHead(404);res.end();}});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const executablePath=process.env.SC_CHROME||['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','C:/Program Files/Google/Chrome/Application/chrome.exe'].find(existsSync);
-let browser;
-try{
- browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});
- for(const width of [390,800,1280]){
-  const page=await browser.newPage({viewport:{width,height:900}});let state='waiting',fail=false;
-  const errors=[];page.on('pageerror',e=>errors.push(String(e)));
-  await page.route('**/api/v1/screen-cast/**',route=>{if(fail)return route.fulfill({status:503,json:{error:'media_unavailable'}});return route.fulfill({status:route.request().method()==='POST'?201:200,json:{id:'fixture',credential:'fixture',code:'0123456789',state,reason:'',expires_at:new Date(Date.now()+300000).toISOString()}});});
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  const shot=async name=>{assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`horizontal overflow at ${width}`);await page.screenshot({path:resolve(output,`receiver-${width}-${name}.png`),fullPage:true});};
-  await shot('idle');await page.locator('#receive').click();await page.waitForFunction(()=>document.querySelector('#code').textContent==='0123456789');assert.equal(await page.locator('#receive').isDisabled(),true);await shot('waiting');
-  state='expired';await page.waitForFunction(()=>document.querySelector('#badge').textContent==='投屏码已过期');await shot('expired');
-  fail=true;await page.locator('#receive').click();await page.waitForFunction(()=>document.querySelector('#error').textContent.length>0);await shot('error');
-  // Pure synthetic video illustration for reviewing the playing layout, no desktop capture.
-  await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=1280;canvas.height=720;const c=canvas.getContext('2d');c.fillStyle='#173976';c.fillRect(0,0,1280,720);c.fillStyle='#fff';c.font='48px sans-serif';c.fillText('Screen Cast · Synthetic Preview',80,160);const v=document.querySelector('video');v.srcObject=canvas.captureStream(1);void v.play();document.body.dataset.playing='true';document.querySelector('#placeholder').hidden=true;document.querySelector('#badge').textContent='正在播放';document.querySelector('#code').textContent='已配对';document.querySelector('#error').textContent='';document.querySelector('#fullscreen').disabled=false;});
-  await page.waitForFunction(()=>document.querySelector('video').videoWidth===1280);await shot('playing');assert.deepEqual(errors,[]);await page.close();
- }
- console.log('Receiver UI: desktop/mobile layout and waiting/expired/error/playing fixtures passed');
-}finally{await browser?.close();await new Promise(r=>server.close(r));}
+import { uiHarness, syntheticVideo } from '../../../../packages/web/ui/test-utils.mjs';
+
+const ui = await uiHarness(chromium, 'screen-cast');
+try {
+  for (const width of [390, 800, 1280, 1440]) {
+    const page = await ui.browser.newPage({viewport: {width, height: 900}});
+    let state = 'waiting', fail = false;
+    const errors = [];
+    page.on('pageerror', error => errors.push(String(error)));
+    await page.route('**/api/**', route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/api/v1/auth/me') return route.fulfill({json: {id:'fixture-user', name:'体验用户'}});
+      if (path === '/api/v1/organizations') return route.fulfill({json: {items:[{id:'fixture-org', data:{name:'设计工作室'}}]}});
+      if (!path.startsWith('/api/v1/av/screen-cast/')) throw new Error(`Unexpected request: ${path}`);
+      if (fail) return route.fulfill({status:503, json:{error:{code:'media_unavailable'}}});
+      return route.fulfill({json: {id:'fixture', credential:'fixture', pairing_code:'0123456789', state, reason:'', expires_at:new Date(Date.now()+300000).toISOString()}});
+    });
+    await page.goto(ui.url);
+    await page.getByRole('button', {name:'账号与组织', exact:true}).waitFor();
+    await page.waitForFunction(() => document.querySelector('.av-account-session select').value === 'fixture-org');
+    await ui.shot(page, `${width}-idle`);
+    const account = page.getByRole('button', {name:'账号与组织', exact:true});
+    await account.click();
+    await page.locator('#account-dialog[open]').waitFor();
+    await ui.shot(page, `${width}-account`);
+    assert.equal(await page.evaluate(() => document.activeElement.tagName), 'SELECT');
+    await page.keyboard.press('Escape');
+    assert(await account.evaluate(element => document.activeElement === element));
+    await page.locator('#receive').click();
+    await page.waitForFunction(() => document.querySelector('#code').textContent === '0123456789');
+    assert(await page.locator('#receive').isDisabled());
+    await ui.shot(page, `${width}-waiting`);
+    state = 'expired';
+    await page.waitForFunction(() => document.querySelector('#badge').textContent === '投屏码已过期');
+    await ui.shot(page, `${width}-expired`);
+    fail = true;
+    await page.locator('#receive').click();
+    await page.waitForFunction(() => document.querySelector('#error').textContent.length > 0);
+    await ui.shot(page, `${width}-error`);
+    await syntheticVideo(page, 'video', 'Screen Cast Preview');
+    await page.evaluate(() => {
+      document.body.dataset.playing = 'true';
+      document.querySelector('#placeholder').hidden = true;
+      document.querySelector('#badge').textContent = '正在播放';
+      document.querySelector('#code').textContent = '已配对';
+      document.querySelector('#error').textContent = '';
+      document.querySelector('#fullscreen').disabled = false;
+    });
+    await ui.shot(page, `${width}-playing`);
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+  console.log('PASS screen-cast: 4 widths; account focus, waiting, expired, failure and synthetic playback. Screenshots:', ui.output);
+} finally { await ui.close(); }

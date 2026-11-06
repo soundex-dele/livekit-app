@@ -46,6 +46,7 @@ class MainWindow : public QMainWindow {
 
  protected:
   void closeEvent(QCloseEvent*) override;
+  void resizeEvent(QResizeEvent*) override;
 
  private:
   void refresh();
@@ -61,6 +62,8 @@ class MainWindow : public QMainWindow {
   QLabel *status_, *expiry_, *request_, *permissions_, *shortcut_;
   QPushButton *create_, *connect_, *approve_, *reject_, *stop_, *copy_;
   QWidget* pending_;
+  QWidget* sidebar_ = nullptr;
+  QLabel* feedback_ = nullptr;
   QSystemTrayIcon* tray_ = nullptr;
   QTimer timer_;
   QString ui_error_;

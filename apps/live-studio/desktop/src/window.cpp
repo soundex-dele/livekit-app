@@ -1,10 +1,10 @@
 #include "livekit/compat/algorithm.hpp"
 #include "window.hpp"
+#include <av/ui.hpp>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
-#include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -62,13 +62,19 @@ QPushButton* button(const QString& text, const QString& name, QBoxLayout* layout
                     std::function<void()> action) {
   auto* b = new QPushButton(text);
   b->setObjectName(name);
-  b->setMinimumHeight(32);
+  b->setMinimumHeight(36);
+  av::ui::set_button_role(b, name == "startLive" || name == "addSource" || name == "sendMessage"
+                                 ? av::ui::ButtonRole::Primary
+                             : name == "deleteSource" || name == "deleteScene"
+                                 ? av::ui::ButtonRole::Danger
+                                 : av::ui::ButtonRole::Secondary);
   layout->addWidget(b);
   QObject::connect(b, &QPushButton::clicked, context, [action = std::move(action)] { action(); });
   return b;
 }
 
 QScrollArea* scrollPanel(QWidget* widget) {
+  av::ui::set_surface(widget);
   auto* area = new QScrollArea;
   area->setWidgetResizable(true);
   area->setFrameShape(QFrame::NoFrame);
@@ -88,44 +94,7 @@ void configureOffscreenPlatform() {
 #endif
 }
 
-void applyTheme() {
-  QApplication::setStyle("Fusion");
-  QPalette palette;
-  palette.setColor(QPalette::Window, QColor("#101620"));
-  palette.setColor(QPalette::WindowText, QColor("#eef2fa"));
-  palette.setColor(QPalette::Base, QColor("#0d121c"));
-  palette.setColor(QPalette::AlternateBase, QColor("#1b2535"));
-  palette.setColor(QPalette::Text, QColor("#eef2fa"));
-  palette.setColor(QPalette::PlaceholderText, QColor("#9aa9c0"));
-  palette.setColor(QPalette::Button, QColor("#253249"));
-  palette.setColor(QPalette::ButtonText, QColor("#eef2fa"));
-  palette.setColor(QPalette::Highlight, QColor("#9d3156"));
-  palette.setColor(QPalette::HighlightedText, Qt::white);
-  palette.setColor(QPalette::Disabled, QPalette::Text, QColor("#8895ab"));
-  palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor("#8895ab"));
-  qApp->setPalette(palette);
-  qApp->setStyleSheet(QStringLiteral(R"(
-    QWidget { font-size: 13px; }
-    QGroupBox { border: 1px solid #354158; border-radius: 8px; margin-top: 14px; padding: 12px 8px 8px; }
-    QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; color: #b8c2d6; }
-    QPushButton { padding: 5px 10px; border: 1px solid #40506a; border-radius: 5px; background: #253249; }
-    QPushButton:hover { background: #344761; }
-    QPushButton:pressed { background: #172333; }
-    QPushButton:disabled { background: #1a2230; color: #8895ab; }
-    QPushButton#startLive { background: #ba355c; border-color: #dc527b; color: white; font-weight: bold; }
-    QPushButton#startLive:disabled { background: #543044; color: #bca4af; }
-    QLineEdit, QPlainTextEdit, QListWidget, QComboBox, QDoubleSpinBox { padding: 5px; border: 1px solid #40506a; border-radius: 4px; }
-    QPushButton:focus, QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QComboBox:focus, QDoubleSpinBox:focus { border: 2px solid #ff8caa; }
-    QListWidget::item { padding: 7px 4px; }
-    QListWidget::item:selected { background: #543044; }
-    QTabWidget::pane { border: 1px solid #354158; }
-    QTabBar::tab { padding: 9px 12px; }
-    QProgressBar { border: 1px solid #40506a; border-radius: 3px; max-height: 12px; background: #0d121c; }
-    QProgressBar::chunk { background: #58ccab; }
-    QLabel#error { color: #ff9bac; }
-    QLabel#brand { color: #ff8caa; font-size: 18px; font-weight: bold; }
-  )"));
-}
+void applyTheme() {}
 
 struct Window::Impl {
   Window* w;
@@ -270,12 +239,24 @@ struct Window::Impl {
   }
 
   void build() {
-    w->setWindowTitle(QStringLiteral("AV 直播助手 · Qt 6"));
+    w->setWindowTitle(QStringLiteral("AV 直播助手"));
     w->resize(1480, 920);
     w->setMinimumSize(1080, 700);
+    av::ui::apply_theme(w, av::ui::Theme::Dark);
+    w->setStyleSheet(av::ui::style_sheet(av::ui::Theme::Dark) + QStringLiteral(R"(
+QLabel#brand { color: #93b4ff; font-size: 18px; font-weight: 600; }
+QLabel#error { color: #fecaca; background: #3b1c2a; border-radius: 8px; padding: 6px 12px; }
+QWidget#resourcePanel, QWidget#inspectorPanel { background: #111c30; border-radius: 12px; }
+QWidget#programPanel { background: #0b1220; border-radius: 12px; }
+QLabel#programHint { color: #b8c7de; font-size: 12px; }
+QProgressBar { max-height: 8px; min-width: 56px; border: none; background: #243249; border-radius: 4px; }
+QProgressBar::chunk { background: #34d399; border-radius: 4px; }
+QTabWidget#inspectorTabs::pane { border: none; }
+QTabWidget#inspectorTabs QTabBar::tab { padding: 10px 12px; }
+)"));
     auto* root = new QWidget;
     auto* layout = new QVBoxLayout(root);
-    layout->setContentsMargins(16, 16, 16, 12);
+    layout->setContentsMargins(20, 20, 20, 12);
     layout->setSpacing(12);
     w->setCentralWidget(root);
     auto* top = new QHBoxLayout;
@@ -295,24 +276,36 @@ struct Window::Impl {
       auto state = session->snapshot();
       if (state.broadcast.empty())
         session->start(s(title->text()));
-      else if (QMessageBox::question(w, QStringLiteral("结束直播"),
-                                     QStringLiteral("结束本次直播并断开连麦？本地录制可继续。")) ==
+      else if (av::ui::MessageBox::warning(w, QStringLiteral("结束直播"),
+                                     QStringLiteral("结束本次直播并断开连麦？本地录制可继续。"),
+                                     QMessageBox::Yes | QMessageBox::No, QMessageBox::No) ==
                QMessageBox::Yes)
         session->stop();
     });
     auto* split = new QSplitter;
+    split->setObjectName("studioWorkspace");
+    split->setHandleWidth(8);
     split->setChildrenCollapsible(false);
     layout->addWidget(split, 1);
     auto* left = new QWidget;
+    left->setObjectName("resourcePanel");
+    av::ui::set_surface(left);
+    left->setMinimumWidth(220);
     auto* ll = new QVBoxLayout(left);
-    ll->setContentsMargins(0, 0, 8, 0);
-    auto* scenesBox = new QGroupBox(QStringLiteral("场景"));
+    ll->setContentsMargins(12, 16, 12, 12);
+    ll->setSpacing(16);
+    auto* scenesBox = new QWidget;
     auto* sl = new QVBoxLayout(scenesBox);
-    ll->addWidget(scenesBox);
+    sl->setContentsMargins(0, 0, 0, 0);
+    sl->setSpacing(8);
+    auto* scenesHeading = label(QStringLiteral("场景"));
+    av::ui::set_text_role(scenesHeading, "heading");
+    sl->addWidget(scenesHeading);
+    ll->addWidget(scenesBox, 1);
     sceneList = new QListWidget;
     sceneList->setObjectName("scenes");
     sceneList->setAccessibleName(QStringLiteral("场景列表"));
-    sceneList->setMaximumHeight(125);
+    sceneList->setMinimumHeight(72);
     sl->addWidget(sceneList);
     auto* sceneActions = new QHBoxLayout;
     sl->addLayout(sceneActions);
@@ -357,14 +350,19 @@ struct Window::Impl {
       refreshSources();
       changed();
     });
-    auto* sourcesBox = new QGroupBox(QStringLiteral("素材 · 上层优先"));
+    auto* sourcesBox = new QWidget;
     auto* sourcesLayout = new QVBoxLayout(sourcesBox);
-    ll->addWidget(sourcesBox);
+    sourcesLayout->setContentsMargins(0, 0, 0, 0);
+    sourcesLayout->setSpacing(8);
+    auto* sourcesHeading = label(QStringLiteral("素材 · 上层优先"));
+    av::ui::set_text_role(sourcesHeading, "heading");
+    sourcesLayout->addWidget(sourcesHeading);
+    ll->addWidget(sourcesBox, 2);
     action(QStringLiteral("+ 添加素材"), "addSource", sourcesLayout, [this] { addSource(); });
     sourceList = new QListWidget;
     sourceList->setObjectName("sources");
     sourceList->setAccessibleName(QStringLiteral("素材列表"));
-    sourceList->setMaximumHeight(150);
+    sourceList->setMinimumHeight(100);
     sourcesLayout->addWidget(sourceList);
     auto* sourceActions = new QHBoxLayout;
     sourcesLayout->addLayout(sourceActions);
@@ -402,17 +400,21 @@ struct Window::Impl {
     properties->setObjectName("properties");
     properties->setWidgetResizable(true);
     properties->setFrameShape(QFrame::NoFrame);
-    ll->addWidget(properties, 1);
+
     split->addWidget(left);
     auto* center = new QWidget;
+    center->setObjectName("programPanel");
+    av::ui::set_surface(center, "media");
+    center->setMinimumWidth(304);
     auto* cl = new QVBoxLayout(center);
-    cl->setContentsMargins(8, 0, 8, 0);
+    cl->setContentsMargins(12, 16, 12, 12);
     auto* previewHeader = new QHBoxLayout;
     previewHeader->addWidget(label(QStringLiteral("节目预览")));
     previewHeader->addStretch();
     previewHeader->addWidget(label(QStringLiteral("PROGRAM")));
     cl->addLayout(previewHeader);
     preview = new Preview;
+    preview->setMinimumSize(280, 200);
     cl->addWidget(preview, 1);
     preview->selectSource = [this](int index) {
       source = index;
@@ -432,12 +434,18 @@ struct Window::Impl {
       syncTransform();
       changed();
     };
-    auto* hint = label(QStringLiteral("拖动 / 方向键移动 · Shift 调整尺寸 · 左侧属性精确编辑"));
-    hint->setStyleSheet("color: #b8c2d6;");
+    auto* hint = label(QStringLiteral("拖动 / 方向键移动 · Shift 调整尺寸 · 右侧属性精确编辑"));
+    hint->setObjectName("programHint");
     cl->addWidget(hint);
-    auto* mixer = new QGroupBox(QStringLiteral("混音器"));
-    auto* mix = new QVBoxLayout(mixer);
-    cl->addWidget(mixer);
+    auto* mixer = new QWidget;
+    mixer->setObjectName("audioMixer");
+    av::ui::set_surface(mixer);
+    auto* mix = new QHBoxLayout(mixer);
+    mix->setContentsMargins(16, 10, 16, 10);
+    mix->setSpacing(20);
+    auto* mixerLabel = label(QStringLiteral("混音"));
+    av::ui::set_text_role(mixerLabel, "heading");
+    mix->addWidget(mixerLabel);
     auto audioRow = [this, mix](const QString& text, const QString& name, bool* enabled,
                                 float* volume, QProgressBar** meter) {
       auto* row = new QHBoxLayout;
@@ -448,6 +456,7 @@ struct Window::Impl {
       check->setEnabled(!config.offline);
       row->addWidget(check);
       auto* gain = new QDoubleSpinBox;
+      gain->setMaximumWidth(78);
       gain->setRange(0, 2);
       gain->setSingleStep(.05);
       gain->setValue(*volume);
@@ -509,8 +518,19 @@ struct Window::Impl {
     });
     split->addWidget(center);
     auto* right = new QWidget;
-    auto* rl = new QVBoxLayout(right);
-    rl->setContentsMargins(8, 0, 0, 0);
+    right->setObjectName("inspectorPanel");
+    av::ui::set_surface(right);
+    right->setMinimumWidth(260);
+    auto* rightLayout = new QVBoxLayout(right);
+    rightLayout->setContentsMargins(8, 8, 8, 8);
+    auto* inspectorTabs = new QTabWidget;
+    inspectorTabs->setObjectName("inspectorTabs");
+    rightLayout->addWidget(inspectorTabs);
+    inspectorTabs->addTab(properties, QStringLiteral("素材属性"));
+    auto* interactionPanel = new QWidget;
+    inspectorTabs->addTab(interactionPanel, QStringLiteral("直播互动"));
+    auto* rl = new QVBoxLayout(interactionPanel);
+    rl->setContentsMargins(4, 12, 4, 4);
     auto* liveHeader = new QHBoxLayout;
     rl->addLayout(liveHeader);
     online = label(QStringLiteral("直播互动 · 未开播"));
@@ -549,8 +569,9 @@ struct Window::Impl {
     interactions->addTab(scrollPanel(guestPage), QStringLiteral("连麦"));
     interactions->addTab(scrollPanel(pkPage), QStringLiteral("PK / 榜单"));
     split->addWidget(right);
-    split->setSizes({280, 800, 320});
+    split->setSizes({240, 820, 320});
     split->setStretchFactor(1, 1);
+    layout->addWidget(mixer);
     errorLabel = label(error);
     errorLabel->setObjectName("error");
     layout->addWidget(errorLabel);
@@ -604,12 +625,15 @@ struct Window::Impl {
 
   void refreshProperties() {
     auto* pane = new QWidget;
+    av::ui::set_surface(pane);
+    pane->setPalette(w->palette());
     auto* form = new QFormLayout(pane);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     properties->setWidget(pane);
     if (!item()) {
-      form->addRow(label(QStringLiteral("选择素材以编辑属性")));
+      form->addRow(new av::ui::EmptyState(QStringLiteral("选择一个素材"),
+                                         QStringLiteral("在左侧素材列表中选择内容，\n即可调整位置、尺寸和效果。"), pane));
       return;
     }
     auto* name = new QLineEdit(q(item()->name));
@@ -717,9 +741,7 @@ struct Window::Impl {
                                            item()->chroma.color[2])
                         : QColor::fromRgbF(item()->color[0], item()->color[1], item()->color[2],
                                            item()->color[3]);
-        auto selectedColor = QColorDialog::getColor(
-            c, w, QStringLiteral("选择颜色"),
-            chroma ? QColorDialog::ColorDialogOptions{} : QColorDialog::ShowAlphaChannel);
+        auto selectedColor = av::ui::choose_color(c, w, QStringLiteral("选择颜色"));
         if (!selectedColor.isValid() || !item() || item()->id != sourceId)
           return;
         if (chroma)
@@ -752,10 +774,9 @@ struct Window::Impl {
   }
 
   void addSource() {
-    QDialog dialog(w);
-    dialog.setWindowTitle(QStringLiteral("添加素材"));
-    dialog.setMinimumWidth(480);
-    auto* layout = new QVBoxLayout(&dialog);
+    av::ui::Dialog dialog(w, QStringLiteral("添加素材"),
+                          QStringLiteral("选择内容来源，让你的节目更丰富。"));
+    auto* layout = dialog.content_layout();
     auto* form = new QFormLayout;
     layout->addLayout(form);
     auto* kind = new QComboBox;
@@ -782,8 +803,10 @@ struct Window::Impl {
     layout->addWidget(info);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("添加"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
     buttons->button(QDialogButtonBox::Ok)->setObjectName("confirmSource");
-    layout->addWidget(buttons);
+    dialog.button_layout()->addWidget(buttons);
+    av::ui::set_button_role(buttons->button(QDialogButtonBox::Ok), av::ui::ButtonRole::Primary);
     using DeviceResult = std::pair<std::vector<sdk::StudioDevice>, QString>;
     auto* watcher = new QFutureWatcher<DeviceResult>(&dialog);
     int requestKind = -1;
@@ -872,10 +895,9 @@ struct Window::Impl {
   }
 
   void account() {
-    QDialog dialog(w);
-    dialog.setWindowTitle(QStringLiteral("账号"));
-    dialog.setMinimumWidth(440);
-    auto* layout = new QVBoxLayout(&dialog);
+    av::ui::Dialog dialog(w, QStringLiteral("账号与组织"),
+                          QStringLiteral("登录账号后即可开始直播，与观众互动。"));
+    auto* layout = dialog.content_layout();
     auto* form = new QFormLayout;
     layout->addLayout(form);
     auto state = session->snapshot();
@@ -894,10 +916,12 @@ struct Window::Impl {
     auto* guidance = label(QStringLiteral("用户名 3–32 位字母、数字、下划线；密码至少 10 位"));
     layout->addWidget(guidance);
     auto* login = new QPushButton(QStringLiteral("登录 / 注册"));
+    av::ui::set_button_role(login, av::ui::ButtonRole::Primary);
     layout->addWidget(login);
     auto* user = label("");
     layout->addWidget(user);
     auto* logout = new QPushButton(QStringLiteral("退出账号"));
+    av::ui::set_button_role(logout, av::ui::ButtonRole::Danger);
     layout->addWidget(logout);
     auto* oldPassword = new QLineEdit;
     oldPassword->setEchoMode(QLineEdit::Password);
@@ -910,36 +934,61 @@ struct Window::Impl {
     auto* feedback = label("");
     layout->addWidget(feedback);
     auto* close = new QDialogButtonBox(QDialogButtonBox::Close);
-    layout->addWidget(close);
+    close->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
+    dialog.button_layout()->addWidget(close);
     QObject::connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    enum class AccountOperation { None, Login, Logout, Password };
+    AccountOperation pending = AccountOperation::None;
     QObject::connect(login, &QPushButton::clicked, &dialog, [&] {
+      pending = AccountOperation::Login;
+      dialog.set_busy(true);
+      dialog.set_error({});
       session->login(s(url->text()), s(name->text()), s(password->text()),
                      registration->isChecked(), s(organization->text().trimmed()));
-      password->clear();
     });
-    QObject::connect(logout, &QPushButton::clicked, &dialog, [&] { session->logout(); });
+    QObject::connect(logout, &QPushButton::clicked, &dialog, [&] {
+      pending = AccountOperation::Logout;
+      dialog.set_busy(true);
+      dialog.set_error({});
+      session->logout();
+    });
     QObject::connect(change, &QPushButton::clicked, &dialog, [&] {
+      pending = AccountOperation::Password;
+      dialog.set_busy(true);
+      dialog.set_error({});
       session->change_password(s(oldPassword->text()), s(newPassword->text()));
-      oldPassword->clear();
-      newPassword->clear();
     });
     QTimer poll;
     auto refresh = [&] {
       auto state = session->snapshot();
       bool authenticated = !state.user.is_null();
+      if (!state.busy && pending != AccountOperation::None) {
+        const bool succeeded = pending == AccountOperation::Login
+                                   ? authenticated
+                                   : !authenticated && state.error.empty();
+        if (succeeded) {
+          password->clear();
+          oldPassword->clear();
+          newPassword->clear();
+        }
+        pending = AccountOperation::None;
+      }
+      dialog.set_busy(state.busy);
+      dialog.set_error(state.busy || config.offline ? QString() : q(state.error));
       user->setText(authenticated ? QStringLiteral("已登录：") + q(state.user.value("name", ""))
                                   : QStringLiteral("尚未登录"));
-      for (auto* edit : {name, password})
-        edit->setEnabled(!authenticated);
-      registration->setEnabled(!authenticated);
+      for (auto* edit : {name, password, url, organization}) {
+        edit->setEnabled(!authenticated && !state.busy);
+      }
+      registration->setEnabled(!authenticated && !state.busy);
       login->setEnabled(!authenticated && !state.busy && !config.offline);
       logout->setEnabled(authenticated && !state.busy);
-      oldPassword->setEnabled(authenticated);
-      newPassword->setEnabled(authenticated);
+      oldPassword->setEnabled(authenticated && !state.busy);
+      newPassword->setEnabled(authenticated && !state.busy);
       change->setEnabled(authenticated && !state.busy);
       feedback->setText(config.offline ? QStringLiteral("离屏模式不连接账号服务")
                         : state.busy   ? QStringLiteral("正在处理…")
-                                       : q(state.error));
+                                       : QString());
     };
     QObject::connect(&poll, &QTimer::timeout, &dialog, refresh);
     poll.start(200);
@@ -1141,8 +1190,9 @@ bool Window::saveProject() {
 void Window::closeEvent(QCloseEvent* event) {
   if (!impl_->config.offline &&
       (!impl_->session->snapshot().broadcast.empty() || mediaSnapshot().recording)) {
-    if (QMessageBox::question(this, QStringLiteral("退出直播助手"),
-                              QStringLiteral("直播或录制正在进行，确定结束并退出？")) !=
+    if (av::ui::MessageBox::warning(this, QStringLiteral("退出直播助手"),
+                              QStringLiteral("直播或录制正在进行，确定结束并退出？"),
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::No) !=
         QMessageBox::Yes) {
       event->ignore();
       return;

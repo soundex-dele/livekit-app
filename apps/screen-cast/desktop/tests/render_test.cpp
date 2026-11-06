@@ -7,6 +7,7 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QSettings>
+#include <QScrollArea>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -171,13 +172,25 @@ class UiTest : public QObject {
         QTest::qWait(10);
         const auto* list = w.findChild<QListWidget*>("displays");
         const auto* action = w.findChild<QPushButton*>(s.finished ? "start" : "stop");
-        QVERIFY(!list->geometry().intersects(action->geometry()));
+        const auto* fields = w.findChild<QScrollArea*>("connectionFields");
+        QVERIFY(fields);
+        const QRect listBounds = QRect(list->mapTo(&w, QPoint()), list->size())
+                                     .intersected(QRect(fields->viewport()->mapTo(&w, QPoint()),
+                                                        fields->viewport()->size()));
+        const QRect actionBounds(action->mapTo(&w, QPoint()), action->size());
+        QVERIFY(!listBounds.intersects(actionBounds));
         QVERIFY(list->parentWidget()->rect().contains(list->geometry()));
+        QVERIFY(w.rect().contains(actionBounds));
+        QVERIFY(action->parentWidget() != fields->widget());
+        QCOMPARE(w.findChild<QWidget*>("sidebar")->width(), size.width() < 960 ? 64 : 176);
         QVERIFY(w.grab().save(prefix + "-" + state + ".png"));
       }
       w.findChild<QPushButton*>("nav1")->click();
       QTest::qWait(10);
       QVERIFY(w.grab().save(prefix + "-settings.png"));
+      w.findChild<QPushButton*>("nav2")->click();
+      QTest::qWait(10);
+      QVERIFY(w.grab().save(prefix + "-help.png"));
       w.findChild<QPushButton*>("nav0")->click();
     }
   }

@@ -1,4 +1,5 @@
 #include "features/ui.hpp"
+#include <av/ui.hpp>
 #include <QCloseEvent>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -10,6 +11,8 @@
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QSettings>
+#include <QResizeEvent>
+#include <QScrollArea>
 #include <QStackedWidget>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -57,13 +60,15 @@ namespace {
 QLabel* label(QString text, QString role = {}, QWidget* parent = nullptr) {
   auto* w = new QLabel(text, parent);
   w->setWordWrap(true);
-  if (!role.isEmpty())
-    w->setProperty("role", role);
+  w->setTextFormat(Qt::PlainText);
+  if (!role.isEmpty()) {
+    av::ui::set_text_role(w, role.toUtf8().constData());
+  }
   return w;
 }
 
 QFrame* card() {
-  auto* w = new QFrame;
+  auto* w = new av::ui::Card;
   w->setObjectName("card");
   return w;
 }
@@ -73,6 +78,9 @@ QPushButton* button(QString text, QString name) {
   b->setObjectName(name);
   b->setMinimumHeight(40);
   b->setCursor(Qt::PointingHandCursor);
+  av::ui::set_button_role(b, name == "start" || name == "save" ? av::ui::ButtonRole::Primary
+                             : name == "stop"                  ? av::ui::ButtonRole::Danger
+                                                               : av::ui::ButtonRole::Secondary);
   return b;
 }
 }  // namespace
@@ -92,7 +100,7 @@ void Preview::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing);
   p.setPen(Qt::NoPen);
-  p.setBrush(image_.isNull() ? QColor("#f0f5ff") : QColor("#101828"));
+  p.setBrush(QColor("#0B1220"));
   p.drawRoundedRect(rect(), 12, 12);
   if (!image_.isNull()) {
     auto fitted = image_.size().scaled(size(), Qt::KeepAspectRatio);
@@ -104,12 +112,12 @@ void Preview::paintEvent(QPaintEvent*) {
   }
   const QPoint c = rect().center() - QPoint(0, 20);
   QRect monitor(c.x() - 58, c.y() - 38, 116, 70);
-  p.setPen(QPen(QColor("#3d73e6"), 3));
-  p.setBrush(QColor("#ffffff"));
+  p.setPen(QPen(QColor("#60A5FA"), 3));
+  p.setBrush(QColor("#17243B"));
   p.drawRoundedRect(monitor, 8, 8);
   p.drawLine(c + QPoint(0, 33), c + QPoint(0, 49));
   p.drawLine(c + QPoint(-26, 49), c + QPoint(26, 49));
-  p.setPen(QColor("#52627a"));
+  p.setPen(QColor("#CBD5E1"));
   p.drawText(QRect(12, c.y() + 67, width() - 24, 44), Qt::AlignCenter | Qt::TextWordWrap,
              "连接成功后，画面将在这里显示");
 }
@@ -118,37 +126,43 @@ Window::Window(QWidget* p) : QMainWindow(p) {
   setWindowTitle("局域网传屏");
   setMinimumSize(800, 600);
   resize(1040, 720);
-  setStyleSheet(R"(
- QWidget{font-family:"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;color:#172b4d;}
- QMainWindow,QWidget#root{background:#f5f7fb;} QFrame#sidebar,QFrame#card{background:white;border:1px solid #e0e6f0;border-radius:12px;}
- QLabel[role="title"]{font-size:26px;font-weight:600;} QLabel[role="heading"]{font-size:17px;font-weight:600;} QLabel[role="muted"]{color:#52627a;}
- QLabel#status{color:#245ec7;font-weight:600;} QLabel#error{color:#b42318;} QLineEdit{background:white;border:1px solid #a9b7cd;border-radius:8px;padding:10px;selection-background-color:#245ec7;}
- QLineEdit#code{font-size:26px;font-weight:600;padding:14px;} QPushButton{background:white;border:1px solid #b5c2d6;border-radius:8px;padding:8px 16px;}
- QPushButton:hover{background:#edf3ff;border-color:#245ec7;} QPushButton:pressed{background:#dbe8ff;} QPushButton#start,QPushButton#save{background:#245ec7;color:white;border-color:#245ec7;font-weight:600;}
- QPushButton#start:hover,QPushButton#save:hover{background:#194baf;} QPushButton:disabled{background:#e8edf5;color:#697a91;border-color:#d7dfeb;} QPushButton:focus,QLineEdit:focus,QListWidget:focus{border:2px solid #245ec7;}
- QPushButton[nav="true"]{text-align:left;border:0;background:transparent;padding:12px 16px;} QPushButton[nav="true"]:checked{background:#eaf1ff;color:#245ec7;font-weight:600;}
- QListWidget{background:white;border:1px solid #c6d1e2;border-radius:8px;outline:0;} QListWidget::item{padding:10px;border-bottom:1px solid #edf1f7;} QListWidget::item:selected{background:#eaf1ff;color:#164ca9;}
- )");
+  av::ui::apply_theme(this, av::ui::Theme::Light);
+  setStyleSheet(styleSheet() + QStringLiteral(R"(
+    QLineEdit#code { font-size: 24px; font-weight: 600; padding: 12px; }
+    QPushButton[nav="true"] { text-align: left; border: 1px solid transparent;
+      background: transparent; padding: 10px; }
+    QPushButton[nav="true"]:checked { color: #1D4ED8; background: #EFF6FF;
+      border-color: #BFDBFE; font-weight: 600; }
+    QScrollArea#connectionFields { border: 0; background: #FFFFFF; }
+    QWidget#connectionViewport, QWidget#connectionFieldContent { background: #FFFFFF; }
+  )"));
   auto* root = new QWidget;
   root->setObjectName("root");
   setCentralWidget(root);
   auto* layout = new QHBoxLayout(root);
-  layout->setContentsMargins(16, 16, 16, 16);
-  layout->setSpacing(20);
+  layout->setContentsMargins(0, 0, 24, 24);
+  layout->setSpacing(24);
   auto* side = new QFrame;
   side->setObjectName("sidebar");
-  side->setFixedWidth(156);
+  side->setFixedWidth(176);
+  sidebar_ = side;
+  av::ui::set_surface(side, "sidebar");
   auto* nav = new QVBoxLayout(side);
-  nav->setContentsMargins(12, 24, 12, 16);
+  nav->setContentsMargins(8, 24, 8, 16);
   nav->setSpacing(12);
-  nav->addWidget(label("局域网传屏", "heading"));
-  nav->addWidget(label("让分享更简单", "muted"));
+  nav->addWidget(label("AV Cast", "heading"));
+  nav->addWidget(label("局域网传屏", "caption"));
   nav->addSpacing(24);
   pages_ = new QStackedWidget;
   pages_->setObjectName("pages");
   for (int i = 0; i < 3; ++i) {
     auto* b = button(QStringList{"投屏", "设置", "帮助"}[i], "nav" + QString::number(i));
     b->setProperty("nav", true);
+    b->setProperty("navTitle", b->text());
+    b->setToolTip(b->text());
+    b->setAccessibleName(b->text());
+    const av::ui::Icon icons[] = {av::ui::Icon::Screen, av::ui::Icon::Settings, av::ui::Icon::Info};
+    b->setIcon(av::ui::icon(icons[i], QColor("#2563EB")));
     b->setCheckable(true);
     b->setAutoExclusive(true);
     b->setParent(side);
@@ -158,27 +172,44 @@ Window::Window(QWidget* p) : QMainWindow(p) {
     connect(b, &QPushButton::clicked, this, [this, i] { pages_->setCurrentIndex(i); });
   }
   nav->addStretch();
-  nav->addWidget(label("安全连接\n一次一码", "muted"));
+  nav->addWidget(label("一次一码 · 安全连接", "caption"));
   layout->addWidget(side);
   layout->addWidget(pages_, 1);
   auto* home = new QWidget;
   auto* body = new QVBoxLayout(home);
-  body->setContentsMargins(0, 8, 0, 0);
+  body->setContentsMargins(0, 24, 0, 0);
   body->setSpacing(14);
-  body->addWidget(label("分享你的屏幕", "title"));
-  body->addWidget(label("在接收设备的浏览器中生成投屏码，即可连接。", "muted"));
-  status_ = label("准备投屏");
+  auto* pageHeader = new QHBoxLayout;
+  pageHeader->addWidget(label("分享你的屏幕", "title"), 1);
+  status_ = new av::ui::StatusBadge("准备投屏");
   status_->setObjectName("status");
   status_->setAccessibleName("投屏状态");
-  body->addWidget(status_);
+  pageHeader->addWidget(status_);
+  body->addLayout(pageHeader);
+  body->addWidget(label("填写接收设备的投屏码，选择要分享的屏幕。", "muted"));
   auto* columns = new QHBoxLayout;
   columns->setSpacing(16);
   auto* connection = card();
   connection->setMinimumWidth(278);
   connection->setMaximumWidth(340);
-  auto* form = new QVBoxLayout(connection);
-  form->setContentsMargins(16, 16, 16, 16);
-  form->setSpacing(10);
+  connection->setObjectName("connectionCard");
+  auto* connectionLayout = new QVBoxLayout(connection);
+  connectionLayout->setContentsMargins(16, 16, 16, 16);
+  connectionLayout->setSpacing(12);
+  auto* fields = new QScrollArea;
+  fields->setObjectName("connectionFields");
+  fields->setWidgetResizable(true);
+  fields->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  fields->viewport()->setObjectName("connectionViewport");
+  fields->viewport()->setAttribute(Qt::WA_StyledBackground);
+  auto* fieldContent = new QWidget;
+  fieldContent->setObjectName("connectionFieldContent");
+  fieldContent->setAttribute(Qt::WA_StyledBackground);
+  auto* form = new QVBoxLayout(fieldContent);
+  form->setContentsMargins(0, 0, 4, 0);
+  form->setSpacing(12);
+  fields->setWidget(fieldContent);
+  connectionLayout->addWidget(fields, 1);
   auto* codeLabel = label("接收端投屏码", "heading");
   form->addWidget(codeLabel);
   code_ = new QLineEdit;
@@ -205,20 +236,23 @@ Window::Window(QWidget* p) : QMainWindow(p) {
   displays_->setMinimumHeight(64);
   form->addWidget(displays_, 1);
   start_ = button("开始投屏", "start");
-  form->addWidget(start_);
+  connectionLayout->addWidget(start_);
   stop_ = button("停止投屏", "stop");
-  form->addWidget(stop_);
+  connectionLayout->addWidget(stop_);
   columns->addWidget(connection);
   auto* previewCard = card();
   auto* pv = new QVBoxLayout(previewCard);
   pv->setContentsMargins(16, 16, 16, 16);
-  pv->addWidget(label("屏幕预览", "heading"));
+  auto* previewHeader = new QHBoxLayout;
+  previewHeader->addWidget(label("屏幕预览", "heading"), 1);
+  previewHeader->addWidget(label("仅共享画面", "caption"));
+  pv->addLayout(previewHeader);
   preview_ = new Preview;
   pv->addWidget(preview_, 1);
   pv->addWidget(label("最高 1080p · 15 fps · 仅共享画面", "muted"));
   columns->addWidget(previewCard, 1);
   body->addLayout(columns, 1);
-  error_ = label("");
+  error_ = new av::ui::Notice({}, av::ui::Tone::Error);
   error_->setObjectName("error");
   error_->setAccessibleName("投屏错误");
   error_->setTextFormat(Qt::PlainText);
@@ -228,7 +262,7 @@ Window::Window(QWidget* p) : QMainWindow(p) {
   pages_->addWidget(home);
   auto* settings = new QWidget;
   auto* sl = new QVBoxLayout(settings);
-  sl->setContentsMargins(0, 8, 0, 0);
+  sl->setContentsMargins(0, 24, 0, 0);
   sl->setSpacing(20);
   sl->addWidget(label("连接设置", "title"));
   auto* sc = card();
@@ -249,7 +283,7 @@ Window::Window(QWidget* p) : QMainWindow(p) {
             "muted"));
   save_ = button("保存设置", "save");
   sf->addWidget(save_);
-  serverHint_ = label("");
+  serverHint_ = label("", "caption");
   serverHint_->setObjectName("serverHint");
   sf->addWidget(serverHint_);
   sl->addWidget(sc);
@@ -257,8 +291,8 @@ Window::Window(QWidget* p) : QMainWindow(p) {
   pages_->addWidget(settings);
   auto* help = new QWidget;
   auto* hl = new QVBoxLayout(help);
-  hl->setContentsMargins(0, 8, 0, 0);
-  hl->setSpacing(24);
+  hl->setContentsMargins(0, 24, 0, 0);
+  hl->setSpacing(16);
   hl->addWidget(label("开始你的第一次投屏", "title"));
   for (auto text : {"01  在接收设备浏览器打开服务器地址下的 "
                     "/apps/screen-cast/，点击「接收投屏」。",
@@ -266,8 +300,13 @@ Window::Window(QWidget* p) : QMainWindow(p) {
                     "03  输入接收端显示的 10 位投屏码，选择屏幕，点击「开始投屏」。",
                     "macOS "
                     "首次使用需允许屏幕录制权限。若显示器或分辨率变化，请停止后刷新并重新连"
-                    "接。"})
-    hl->addWidget(label(text));
+                    "接。"}) {
+    auto* step = card();
+    auto* stepLayout = new QVBoxLayout(step);
+    stepLayout->setContentsMargins(20, 16, 20, 16);
+    stepLayout->addWidget(label(text));
+    hl->addWidget(step);
+  }
   hl->addWidget(label("仅适用于可信局域网 · 不传输声音 · 不提供远程控制", "muted"));
   hl->addStretch();
   pages_->addWidget(help);
@@ -370,6 +409,9 @@ void Window::present(const Snapshot& s) {
   status_->setText(!s.error.empty()     ? "投屏遇到问题"
                    : it == labels.end() ? "等待连接"
                                         : it->second);
+  av::ui::set_tone(status_, !s.error.empty()         ? av::ui::Tone::Error
+                            : s.state == "streaming" ? av::ui::Tone::Success
+                                                     : av::ui::Tone::Info);
   showError(readableError(s.error));
   if (s.finished || s.state == "stopping")
     setPreview({});
@@ -394,6 +436,21 @@ void Window::updateControls() {
     serverHint_->setText("请输入有效的 HTTP 或 HTTPS 服务器地址，不含账号、查询参数或片段。");
   else if (serverHint_->text() != "设置已保存")
     serverHint_->clear();
+}
+
+void Window::resizeEvent(QResizeEvent* event) {
+  QMainWindow::resizeEvent(event);
+  if (!sidebar_) {
+    return;
+  }
+  const bool compact = width() < 960;
+  sidebar_->setFixedWidth(compact ? 64 : 176);
+  for (auto* text : sidebar_->findChildren<QLabel*>()) {
+    text->setVisible(!compact);
+  }
+  for (auto* item : sidebar_->findChildren<QPushButton*>()) {
+    item->setText(compact ? QString() : item->property("navTitle").toString());
+  }
 }
 
 void Window::closeEvent(QCloseEvent* e) {

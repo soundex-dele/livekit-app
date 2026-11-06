@@ -1,6 +1,8 @@
 #include "features/remote_control/ui.hpp"
 #include <QApplication>
 #include <QDir>
+#include <QScrollArea>
+#include <QToolBar>
 #include <QTest>
 #include <algorithm>
 #include <iostream>
@@ -30,6 +32,23 @@ int main(int argc, char** argv) {
                 (s.finished || s.state == "waiting"),
             "regenerate only before a request or after cleanup");
     }
+    window.resize(960, 700);
+    remote_app::Snapshot approval;
+    approval.state = "pending";
+    approval.finished = false;
+    approval.name = "协助者张三（需要确认共享主屏幕）";
+    window.display(approval, {}, {true, true, true});
+    app.processEvents();
+    const auto* stop = window.findChild<QPushButton*>("stopSession");
+    const auto* approve = window.findChild<QPushButton*>("approve");
+    check(stop->isVisible() && stop->isEnabled(), "stop remains available during approval");
+    check(stop->mapTo(&window, QPoint()).y() < 72, "stop stays in the fixed header");
+    check(approve->mapTo(&window, QPoint()).y() <
+              window.findChild<QScrollArea*>("taskScroll")->mapTo(&window, QPoint()).y(),
+          "approval precedes the scrollable connection cards");
+    check(window.findChild<QWidget*>("sidebar")->width() == 72, "compact navigation");
+    check(window.grab().save("remote-host-compact-pending.png"), "compact approval screenshot");
+    window.resize(1160, 780);
     window.display({}, {}, {false, false, true});
     app.processEvents();
     check(window.grab().save("remote-host-permissions.png"), "permission screenshot");
@@ -93,6 +112,13 @@ int main(int argc, char** argv) {
     view.show();
     app.processEvents();
     check(view.grab().save("remote-controller.png"), "controller screenshot");
+    view.resize(720, 520);
+    app.processEvents();
+    const auto* composer = view.findChild<QWidget*>("composer");
+    check(composer && composer->width() <= view.width(), "compact composer stays within window");
+    check(view.findChild<QToolBar*>("sessionToolbar")->isVisible(),
+          "session actions remain visible");
+    check(view.grab().save("remote-controller-compact.png"), "compact controller screenshot");
     std::cout << "Qt offscreen render and geometry checks passed\n";
     return 0;
   } catch (const std::exception& e) {

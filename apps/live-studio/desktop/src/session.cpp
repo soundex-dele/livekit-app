@@ -47,10 +47,14 @@ Snapshot Session::snapshot() const {
 
 void Session::enqueue(std::function<void()> f) {
   std::lock_guard lock(mutex_);
-  if (commands_.size() < 32)
+  if (commands_.size() < 32) {
     commands_.push_back(std::move(f));
-  else
+    // Busy includes queued work so the UI cannot resubmit while the worker is
+    // still finishing its periodic refresh before taking this command.
+    state_.busy = true;
+  } else {
     state_.error = "操作队列已满，请稍后重试";
+  }
 }
 
 Json Session::request(const std::string& path, const Json* body) {
@@ -478,7 +482,7 @@ void Session::run() {
         state_.error = e.what();
       }
       std::lock_guard lock(mutex_);
-      state_.busy = false;
+      state_.busy = !commands_.empty();
     }
     try {
       {

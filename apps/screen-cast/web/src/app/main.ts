@@ -3,13 +3,15 @@ import { Room, RoomEvent, Track } from 'livekit-client';
 import { api, terminal, type SessionInfo } from '../services/api';
 import { control, mountAccountPanel } from '../../../../../packages/web/control';
 import '../style.css';
+import { observeStatus } from '../../../../../packages/web/ui';
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const receive = element<HTMLButtonElement>('receive'), stop = element<HTMLButtonElement>('stop'), fullscreen = element<HTMLButtonElement>('fullscreen');
 const badge = element('badge'), code = element('code'), expiry = element('expiry'), hint = element('hint'), error = element('error'), placeholder = element('placeholder');
 const video = document.querySelector('video')!;
 type Run = { session?: SessionInfo; room?: Room; stopped: boolean; connecting: boolean; connected: boolean; frames: boolean; nextHeartbeat: number; frameCallback?: number };
 let current: Run | undefined;
-mountAccountPanel(document.querySelector('.intro')!, () => { if (current) void finish(current, '组织或账号已切换，请重新创建投屏。'); });
+observeStatus(badge, text => text === '正在播放' ? 'success' : text.includes('过期') ? 'warning' : text === '已结束' ? 'neutral' : 'info');
+mountAccountPanel(document.getElementById('account-slot')!, () => { if (current) void finish(current, '组织或账号已切换，请重新创建投屏。'); });
 function active(run: Run) { return current === run && !run.stopped; }
 async function finish(run: Run, message = '', state = '已结束') {
  if (run.stopped) return;

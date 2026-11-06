@@ -2,11 +2,12 @@
 
 AV Platform 的客户端应用仓库。
 
-已实现首版远程协助：`apps/remote-control/desktop/` 为 C++17 + ImGui + SDL2 被控端，`apps/remote-control/web/` 为 TypeScript + Vite 浏览器控制端。构建、启动及验收边界见 [远控运行文档](../docs/integration/remote-control/README.md)。视频会议观看客户端和本地文件播放器已从 SDK 迁入；账号及完整会议业务流程尚未实现。
+远程协助桌面端 `apps/remote-control/desktop/` 使用 C++17 + Qt6 Widgets，浏览器控制端 `apps/remote-control/web/` 使用 TypeScript + Vite。构建、启动及验收边界见 [远控运行文档](../docs/integration/remote-control/README.md)。会议、传屏、直播助手和播放器桌面端也统一使用 Qt6 Widgets；各应用业务能力见对应运行文档。
 
 ## 设计文档
 
 - [客户端设计](docs/design.md)：模块、会话状态、线程与渲染、业务接入、远控和验收计划。
+- [UI 设计与组件规范](docs/ui-design.md)：全部应用的主题、公共控件、业务弹窗及无窗口验证方式。
 - [平台总体设计](../docs/architecture/platform-design.md)：在 AV Platform 同级仓库布局下阅读。
 
 ## 规划职责

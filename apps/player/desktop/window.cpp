@@ -1,4 +1,5 @@
 #include "window.hpp"
+#include "av/ui.hpp"
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -199,6 +200,16 @@ void drawGlyph(QPainter& p, const QString& name) {
 }
 
 QIcon icon(const QString& name) {
+  static const QHash<QString, av::ui::Icon> common{
+      {"open", av::ui::Icon::Folder}, {"add", av::ui::Icon::Plus},
+      {"play", av::ui::Icon::Play}, {"pause", av::ui::Icon::Pause},
+      {"stop", av::ui::Icon::Stop}, {"settings", av::ui::Icon::Settings}};
+  const auto shared = common.constFind(name);
+  if (shared != common.constEnd()) {
+    QIcon result = av::ui::icon(*shared, QColor("#E7EDF7"), 24);
+    result.addPixmap(av::ui::icon(*shared, QColor("#7F8FA7"), 24).pixmap(24), QIcon::Disabled);
+    return result;
+  }
   static QHash<QString, QIcon> cache;
   const auto cached = cache.constFind(name);
   if (cached != cache.constEnd())
@@ -229,7 +240,12 @@ QToolButton* button(QAction* action, QWidget* parent) {
   auto* value = new QToolButton(parent);
   value->setDefaultAction(action);
   value->setIconSize({18, 18});
-  value->setMinimumSize(30, 28);
+  value->setMinimumSize(32, 32);
+  av::ui::set_button_role(value, av::ui::ButtonRole::Ghost);
+  if (action->objectName() == "play") {
+    value->setObjectName("primaryTransport");
+    av::ui::set_button_role(value, av::ui::ButtonRole::Primary);
+  }
   value->setAccessibleName(action->text());
   return value;
 }
@@ -343,49 +359,23 @@ QAction* PlayerWindow::action(const char* name, const QString& text, const QStri
 }
 
 void PlayerWindow::buildUi() {
-  setStyleSheet(R"(
-    QMainWindow, QWidget#root, QWidget#videoArea { background: #0b0d10; color: #dce3ed; }
-    QWidget { font-size: 12px; }
-    QMenuBar { background: #151a20; color: #c9d4e2; border-bottom: 1px solid #232b35; }
-    QMenuBar::item { padding: 5px 11px; background: transparent; }
-    QMenuBar::item:selected { background: #2b3949; }
-    QMenu { background: #1a2028; color: #d8e2ef; border: 1px solid #2e3844; padding: 4px; }
-    QMenu::item { padding: 6px 26px 6px 18px; border-radius: 3px; }
-    QMenu::item:selected { background: #2f6fb5; color: #fff; }
-    QMenu::item:disabled { color: #6b7787; }
-    QMenu::separator { height: 1px; background: #2b3440; margin: 4px 8px; }
-    QDialog { background: #151a20; color: #dce3ed; }
-    QLabel { color: #b9c6d6; background: transparent; }
-    QLabel#banner { background: #3a2c20; color: #ffd9a3; padding: 7px 12px; }
-    QWidget#topBar { background: rgba(9, 12, 16, 214); border-bottom: 1px solid #202832; }
-    QWidget#controls { background: rgba(14, 18, 24, 238); border-top: 1px solid #2a333e; }
-    QWidget#listPanel { background: #12171d; border-left: 1px solid #232b35; }
-    QLabel#listHeader { color: #8fa2b8; font-size: 11px; }
-    QLabel#topTitle { color: #e8eff9; font-size: 13px; }
-    QLabel#time, QLabel#topClock { color: #dce6f3; font-family: Consolas, 'Courier New', monospace; font-size: 12px; }
-    QLabel#status { color: #8797aa; font-size: 11px; }
-    QToolButton, QPushButton { color: #dce3ed; background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 3px; }
-    QToolButton:hover, QPushButton:hover { background: #2c3a4b; }
-    QToolButton:pressed, QToolButton:checked { background: #2f6fb5; }
-    QToolButton:focus, QPushButton:focus, QListView:focus, QSlider:focus { border: 1px solid #6ea8f0; }
-    QToolButton:disabled, QPushButton:disabled { color: #5f6b7b; }
-    QSlider { border: 1px solid transparent; background: transparent; }
-    QSlider::groove:horizontal { background: #39424f; height: 4px; border-radius: 2px; }
-    QSlider::sub-page:horizontal { background: #4f9cf5; border-radius: 2px; }
-    QSlider::add-page:horizontal { background: #39424f; border-radius: 2px; }
-    QSlider::handle:horizontal { background: #e6f0ff; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }
-    QSlider::handle:horizontal:hover { background: #ffffff; width: 12px; margin: -5px 0; border-radius: 6px; }
-    QSlider#progress::groove:horizontal { height: 5px; }
-    QSlider#volume::groove:horizontal { height: 3px; }
-    QListView { background: #12171d; color: #c4d1e0; border: 1px solid #202832; outline: 0; }
-    QListView::item { padding: 6px 7px; border-radius: 2px; }
-    QListView::item:selected { background: #2f6fb5; color: #fff; }
-    QListView::item:hover { background: #222c38; }
-    QSplitter::handle { background: #232b35; width: 1px; }
-    QSpinBox { color: #dce3ed; background: #0f141a; padding: 5px; border: 1px solid #2b3440; }
-    QCheckBox { color: #dce3ed; padding: 5px; }
-    QToolTip { background: #222c38; color: #f0f6ff; border: 1px solid #3c4a5c; padding: 3px 6px; }
-  )");
+  av::ui::apply_theme(this, av::ui::Theme::Dark);
+  setStyleSheet(styleSheet() + QStringLiteral(R"(
+    QWidget#root, QWidget#videoArea { background: #0B1220; }
+    QWidget#topBar { background: rgba(15, 26, 43, 235); border-bottom: 1px solid #34435A; }
+    QWidget#controls { background: rgba(21, 31, 48, 246); border: 1px solid #34435A; border-radius: 12px; }
+    QWidget#listPanel { background: #151F30; border-left: 1px solid #34435A; }
+    QLabel#listHeader { font-size: 16px; font-weight: 600; color: #E7EDF7; }
+    QLabel#topTitle { font-size: 14px; font-weight: 600; }
+    QLabel#time, QLabel#topClock { font-family: Consolas, monospace; font-size: 12px; }
+    QLabel#status { color: #ADBCD1; font-size: 12px; }
+    QLabel#banner { background: #382B16; color: #F9D488; padding: 10px 16px; }
+    QWidget#controls QToolButton { padding: 4px; min-width: 22px; min-height: 22px; }
+    QWidget#controls QToolButton:focus { padding: 3px; }
+    QToolButton#primaryTransport { border-radius: 10px; min-width: 26px; }
+    QListView#playlistView { border: none; background: #101A2A; }
+    QListView#playlistView::item { padding: 10px 8px; }
+  )"));
   repeat_ = static_cast<RepeatMode>(std::clamp(settings_.value("repeat", 0).toInt(), 0, 2));
   auto* open = action("open", QStringLiteral("打开文件…"), "open", QKeySequence::Open);
   auto* add = action("add", QStringLiteral("添加文件…"), "add");
@@ -645,11 +635,16 @@ void PlayerWindow::buildUi() {
   listPanel_->setObjectName("listPanel");
   listPanel_->setMinimumWidth(200);
   auto* listLayout = new QVBoxLayout(listPanel_);
-  listLayout->setContentsMargins(10, 10, 10, 8);
-  listLayout->setSpacing(6);
+  listLayout->setContentsMargins(16, 20, 16, 16);
+  listLayout->setSpacing(12);
   count_ = new QLabel(QStringLiteral("播放列表"), listPanel_);
   count_->setObjectName("listHeader");
+  av::ui::set_text_role(count_, "heading");
   listLayout->addWidget(count_);
+  auto* listHint = new QLabel(QStringLiteral("拖入文件添加 · 拖动列表排序"), listPanel_);
+  listHint->setWordWrap(true);
+  av::ui::set_text_role(listHint, "caption");
+  listLayout->addWidget(listHint);
   list_ = new QListView(listPanel_);
   list_->setObjectName("playlistView");
   list_->setAccessibleName(QStringLiteral("播放列表"));
@@ -668,6 +663,12 @@ void PlayerWindow::buildUi() {
     listButtons->addWidget(button(value, listPanel_));
   listButtons->addStretch();
   listLayout->addLayout(listButtons);
+  auto* addFiles = new QPushButton(QStringLiteral("添加媒体文件"), listPanel_);
+  addFiles->setObjectName("addMediaFiles");
+  addFiles->setIcon(av::ui::icon(av::ui::Icon::Plus, QColor("#E7EDF7")));
+  av::ui::set_button_role(addFiles, av::ui::ButtonRole::Primary);
+  connect(addFiles, &QPushButton::clicked, add, &QAction::trigger);
+  listLayout->addWidget(addFiles);
   splitter_->setStretchFactor(0, 1);
   splitter_->setStretchFactor(1, 0);
   splitter_->setSizes({800, 280});
@@ -780,9 +781,12 @@ void PlayerWindow::browseSubtitles() {
 }
 
 void PlayerWindow::subtitleSettings() {
-  QDialog dialog(this);
-  dialog.setWindowTitle(QStringLiteral("字幕设置"));
-  auto* form = new QFormLayout(&dialog);
+  av::ui::Dialog dialog(this, QStringLiteral("字幕设置"),
+                        QStringLiteral("调整字幕显示和同步，保存后应用到当前视频。"));
+  dialog.setObjectName("subtitleSettingsDialog");
+  auto* form = new QFormLayout;
+  form->setSpacing(16);
+  dialog.content_layout()->addLayout(form);
   auto* enabled = new QCheckBox(QStringLiteral("显示字幕"), &dialog);
   enabled->setChecked(controller_.subtitles.enabled);
   form->addRow(enabled);
@@ -791,25 +795,29 @@ void PlayerWindow::subtitleSettings() {
   delay->setSingleStep(100);
   delay->setSuffix(" ms");
   delay->setValue(controller_.subtitles.delay_ms);
+  delay->setObjectName("subtitleDelay");
   form->addRow(QStringLiteral("时间偏移（正值延后）"), delay);
   auto* size = new QSpinBox(&dialog);
   size->setRange(16, 64);
   size->setValue(subtitleSize_);
+  size->setObjectName("subtitleFontSize");
   form->addRow(QStringLiteral("字幕字号"), size);
   auto* reset = new QPushButton(QStringLiteral("重置偏移"), &dialog);
   form->addRow(reset);
   connect(reset, &QPushButton::clicked, delay, [delay] { delay->setValue(0); });
   auto* remove = new QPushButton(QStringLiteral("移除当前字幕"), &dialog);
+  av::ui::set_button_role(remove, av::ui::ButtonRole::Danger);
   form->addRow(remove);
   connect(remove, &QPushButton::clicked, &dialog, [this, &dialog] {
     controller_.subtitles.clear();
     controller_.subtitleError.clear();
     dialog.reject();
   });
-  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-  form->addRow(buttons);
-  connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  auto* cancel = dialog.add_action(QStringLiteral("取消"));
+  auto* save = dialog.add_action(QStringLiteral("保存设置"), av::ui::ButtonRole::Primary);
+  save->setDefault(true);
+  connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+  connect(save, &QPushButton::clicked, &dialog, &QDialog::accept);
   if (dialog.exec() == QDialog::Accepted) {
     controller_.subtitles.enabled = enabled->isChecked();
     controller_.subtitles.delay_ms = delay->value();
@@ -819,30 +827,41 @@ void PlayerWindow::subtitleSettings() {
 }
 
 void PlayerWindow::showSettings() {
-  QDialog dialog(this);
-  dialog.setWindowTitle(QStringLiteral("播放器设置"));
-  auto* layout = new QVBoxLayout(&dialog);
+  av::ui::Dialog dialog(this, QStringLiteral("播放器设置"),
+                        QStringLiteral("管理播放偏好与本地历史记录。"));
+  dialog.setObjectName("playerSettingsDialog");
+  auto* layout = dialog.content_layout();
   auto* resume = new QCheckBox(QStringLiteral("重新打开文件时继续上次播放"), &dialog);
   resume->setChecked(settings_.value("resumeEnabled", true).toBool());
   layout->addWidget(resume);
   auto* clear = new QPushButton(QStringLiteral("清除播放历史"), &dialog);
+  av::ui::set_button_role(clear, av::ui::ButtonRole::Danger);
   layout->addWidget(clear);
   connect(clear, &QPushButton::clicked, this, [this] {
+    if (av::ui::MessageBox::warning(this, QStringLiteral("清除播放历史"),
+            QStringLiteral("将清除所有已记录的续播位置。此操作无法撤销。"),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
+      return;
+    }
     settings_.clearHistory();
     video_->showOsd(QStringLiteral("播放历史已清除"));
   });
-  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-  layout->addWidget(buttons);
-  connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  auto* cancel = dialog.add_action(QStringLiteral("取消"));
+  auto* save = dialog.add_action(QStringLiteral("保存设置"), av::ui::ButtonRole::Primary);
+  save->setDefault(true);
+  connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+  connect(save, &QPushButton::clicked, &dialog, &QDialog::accept);
   if (dialog.exec() == QDialog::Accepted)
     settings_.set("resumeEnabled", resume->isChecked());
 }
 
 void PlayerWindow::showShortcuts() {
-  QDialog dialog(this);
-  dialog.setWindowTitle(QStringLiteral("快捷键"));
-  auto* form = new QFormLayout(&dialog);
+  av::ui::Dialog dialog(this, QStringLiteral("快捷键"),
+                        QStringLiteral("播放时使用键盘，快速控制画面与声音。"));
+  dialog.setObjectName("playerShortcutsDialog");
+  auto* form = new QFormLayout;
+  form->setSpacing(12);
+  dialog.content_layout()->addLayout(form);
   const QVector<QPair<QString, QString>> entries{
       {QStringLiteral("空格"), QStringLiteral("播放 / 暂停")},
       {QStringLiteral("S"), QStringLiteral("停止")},
@@ -857,9 +876,9 @@ void PlayerWindow::showShortcuts() {
       {QStringLiteral("Esc"), QStringLiteral("退出全屏")}};
   for (const auto& entry : entries)
     form->addRow(entry.first, new QLabel(entry.second, &dialog));
-  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-  form->addRow(buttons);
-  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  auto* close = dialog.add_action(QStringLiteral("知道了"), av::ui::ButtonRole::Primary);
+  close->setDefault(true);
+  connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
   dialog.exec();
 }
 
@@ -933,9 +952,11 @@ void PlayerWindow::positionOverlays() {
     controlLayout->activate();
   video_->setGeometry(0, 0, area.width(), area.height());
   const int controlHeight = std::max(60, controls_->sizeHint().height());
-  controls_->setGeometry(0, area.height() - controlHeight, area.width(), controlHeight);
+  const int inset = area.width() < 560 ? 8 : 12;
+  controls_->setGeometry(inset, area.height() - controlHeight - inset,
+                        std::max(1, area.width() - inset * 2), controlHeight);
   topBar_->setGeometry(0, 0, area.width(), std::max(30, topBar_->sizeHint().height()));
-  video_->setBottomInset(controlHeight + 12);
+  video_->setBottomInset(controlHeight + inset + 12);
   controls_->raise();
   topBar_->raise();
 }

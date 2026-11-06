@@ -1,4 +1,5 @@
 #include "theme.hpp"
+#include <av/ui.hpp>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -7,10 +8,10 @@
 namespace meeting::ui {
 namespace {
 
-const QColor kBrand{"#006eff"};
+const QColor kBrand{"#2563eb"};
 const QColor kBrandLight{"#eaf2ff"};
 const QColor kInk{"#1f2329"};
-const QColor kSubtle{"#8a9099"};
+const QColor kSubtle{"#64748b"};
 const QColor kLine{"#e5e8ed"};
 const QColor kOnDark{"#e7e9ee"};
 const QColor kDanger{"#f04b4b"};
@@ -210,6 +211,9 @@ QIcon glyph(Glyph kind, QColor color, int size) {
 ToolButton::ToolButton(QString text, Glyph icon, QWidget* parent)
     : QPushButton(text, parent), kind_(icon), color_(kOnDark) {
   setProperty("variant", "tool");
+  setAccessibleName(text);
+  setToolTip(text);
+  setFocusPolicy(Qt::StrongFocus);
   setMouseTracking(true);
   setCursor(Qt::PointingHandCursor);
   setMinimumSize(62, 72);
@@ -262,19 +266,27 @@ void ToolButton::paintEvent(QPaintEvent*) {
     p.setPen(danger_ ? QColor("#ff7a7a") : kOnDark);
     p.drawText(QRect(2, 46, width() - 4, 22), Qt::AlignHCenter | Qt::AlignVCenter, text());
   }
+  if (hasFocus()) {
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor("#93b4ff"), 2));
+    p.drawRoundedRect(QRectF(rect()).adjusted(2, 3, -2, -3), 8, 8);
+  }
 }
 
 ActionCard::ActionCard(QString text, Glyph icon, bool primary, QWidget* parent)
     : QPushButton(text, parent), kind_(icon), primary_(primary) {
   setProperty("variant", "card");
+  setAccessibleName(text);
+  setToolTip(text);
+  setFocusPolicy(Qt::StrongFocus);
   setMouseTracking(true);
   setCursor(Qt::PointingHandCursor);
-  setMinimumHeight(112);
+  setMinimumHeight(76);
   setFlat(true);
 }
 
 QSize ActionCard::sizeHint() const {
-  return QSize(220, 112);
+  return QSize(220, 76);
 }
 
 void ActionCard::paintEvent(QPaintEvent*) {
@@ -286,25 +298,42 @@ void ActionCard::paintEvent(QPaintEvent*) {
   QColor fill = primary_ ? (isDown() ? QColor("#0058cc") : kBrand) : QColor("#ffffff");
   if (!primary_ && (underMouse() || isDown()) && isEnabled())
     fill = QColor("#f2f7ff");
-  p.setPen(QPen(primary_ ? QColor("#006eff") : kLine, 1));
+  p.setPen(QPen(primary_ ? kBrand : kLine, 1));
   p.setBrush(fill);
   p.drawRoundedRect(card, 10, 10);
   QColor ink = primary_ ? QColor("#ffffff") : kInk;
   QColor icon_color = primary_ ? QColor("#ffffff") : kBrand;
-  const int side = 40;
-  draw_glyph(p, kind_, QRectF((width() - side) / 2.0, 20, side, side), icon_color);
+  const int side = 30;
+  draw_glyph(p, kind_, QRectF(16, (height() - side) / 2.0, side, side), icon_color);
   QFont font = p.font();
   font.setPixelSize(15);
-  font.setWeight(QFont::Medium);
+  font.setWeight(QFont::DemiBold);
   p.setFont(font);
   p.setPen(ink);
-  p.drawText(QRect(6, 68, width() - 12, 28), Qt::AlignCenter, text());
+  p.drawText(QRect(60, 15, width() - 72, 23), Qt::AlignVCenter, text());
+  font.setPixelSize(12);
+  font.setWeight(QFont::Normal);
+  p.setFont(font);
+  p.setPen(primary_ ? QColor("#e0eaff") : kSubtle);
+  const QString hint = kind_ == Glyph::Plus ? "输入会议号，立即加入"
+                         : kind_ == Glyph::Video ? "发起一场即时交流"
+                                                : "为下一次讨论安排时间";
+  p.drawText(QRect(60, 41, width() - 72, 22), Qt::AlignVCenter, hint);
+  if (hasFocus()) {
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(primary_ ? QColor("#ffffff") : kBrand, 2));
+    p.drawRoundedRect(card.adjusted(3, 3, -3, -3), 8, 8);
+  }
 }
 
 NavButton::NavButton(QString text, Glyph icon, QString object_name, QWidget* parent)
     : QPushButton(text, parent), kind_(icon) {
   setObjectName(object_name);
   setProperty("variant", "nav");
+  setAccessibleName(text);
+  setToolTip(text);
+  setFocusPolicy(Qt::StrongFocus);
+  setCheckable(true);
   setMouseTracking(true);
   setCursor(Qt::PointingHandCursor);
   setFixedSize(64, 62);
@@ -313,6 +342,7 @@ NavButton::NavButton(QString text, Glyph icon, QString object_name, QWidget* par
 
 void NavButton::set_selected(bool selected) {
   selected_ = selected;
+  setChecked(selected);
   update();
 }
 
@@ -340,107 +370,38 @@ void NavButton::paintEvent(QPaintEvent*) {
   p.setFont(font);
   p.setPen(ink);
   p.drawText(QRect(0, 38, width() - 6, 18), Qt::AlignCenter, text());
+  if (hasFocus()) {
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(kBrand, 2));
+    p.drawRoundedRect(QRectF(rect()).adjusted(4, 4, -8, -4), 8, 8);
+  }
 }
 
 QString style_sheet() {
-  return QStringLiteral(R"(
-QWidget {
-  font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
-  font-size: 13px;
-  color: #1f2329;
+  return av::ui::style_sheet(av::ui::Theme::Light) + QStringLiteral(R"(
+QMainWindow#conferenceWindow, QWidget#homePage, QWidget#waitingPage { background: #f5f7fb; }
+QWidget#navRail { background: #ffffff; border-right: 1px solid #e2e8f0; }
+QWidget#waitingCard, QWidget#listCard { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; }
+QLabel#brand { color: #2563eb; font-size: 16px; font-weight: 600; }
+QLabel#heading { color: #0f172a; font-size: 24px; font-weight: 600; }
+QLabel#sectionTitle { color: #0f172a; font-size: 16px; font-weight: 600; }
+QLabel#subtle, QLabel#meetingSubtle, QLabel#meetingNumber, QLabel#memberCount { color: #64748b; }
+QLabel#notice { color: #9a3412; background: #fff7ed; padding: 10px 20px; border-bottom: 1px solid #fed7aa; }
+QPushButton[variant="tool"], QPushButton[variant="card"], QPushButton[variant="nav"] { background: transparent; border: none; padding: 0; }
+QWidget#meetingPage, QWidget#videoStage { background: #0b1220; }
+QWidget#meetingTopBar { background: #ffffff; border-bottom: 1px solid #e2e8f0; }
+QLabel#meetingTitle { color: #0f172a; font-size: 14px; font-weight: 600; }
+QWidget#meetingToolbar { background: #111c30; border-top: 1px solid #263449; }
+QTabWidget#meetingSidePanel { background: #ffffff; border-left: 1px solid #e2e8f0; }
+QWidget#meetingPage QPushButton#previousPage, QWidget#meetingPage QPushButton#nextPage {
+  background: #1e293b; border: 1px solid #334155; color: #f8fafc; padding: 0;
 }
-QMainWindow#conferenceWindow, QDialog { background: #ffffff; }
-QWidget#homePage, QWidget#waitingPage { background: #f5f6f8; }
-QWidget#meetingPage { background: #17181c; }
-QWidget#navRail { background: #ffffff; border-right: 1px solid #e9ebef; }
-QWidget#waitingCard { background: #ffffff; border: 1px solid #e9ebef; border-radius: 12px; }
-QWidget#listCard { background: #ffffff; border: 1px solid #e9ebef; border-radius: 10px; }
-QWidget#meetingTopBar, QWidget#meetingToolbar { background: #1b1c20; }
-QWidget#videoStage { background: #101114; }
-QWidget#meetingSidePanel, QWidget#meetingPage QTabWidget::pane { background: #22242a; }
-QLabel#brand { color: #006eff; font-size: 17px; font-weight: 600; }
-QLabel#heading { font-size: 23px; font-weight: 600; color: #1f2329; }
-QLabel#sectionTitle { font-size: 15px; font-weight: 600; color: #1f2329; }
-QLabel#subtle, QLabel#meetingSubtle, QLabel#meetingNumber, QLabel#memberCount {
-  color: #8a9099;
+QWidget#meetingPage QLabel#pageLabel { color: #cbd5e1; }
+QTabWidget#homeTabs::pane { border: none; }
+QListWidget#upcomingMeetings, QListWidget#meetingHistory { border: none; }
+QListWidget#upcomingMeetings::item, QListWidget#meetingHistory::item {
+  padding: 14px 10px; border-bottom: 1px solid #edf1f7;
 }
-QLabel#notice {
-  color: #a13b21; background: #fff2e7; padding: 8px 14px;
-  border-bottom: 1px solid #f6d8c5;
-}
-QLabel#meetingTitle { color: #f2f4f8; font-size: 14px; font-weight: 600; }
-QLabel#meetingNumber, QLabel#memberCount { color: #8e949f; font-size: 12px; }
-QPushButton {
-  background: #ffffff; border: 1px solid #e3e6eb; border-radius: 6px;
-  padding: 8px 14px; color: #1f2329;
-}
-QPushButton:hover { background: #f2f7ff; border-color: #a9cbff; color: #006eff; }
-QPushButton:pressed { background: #e4efff; }
-QPushButton:focus, QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus,
-QDateTimeEdit:focus, QComboBox:focus { border: 1px solid #006eff; }
-QPushButton:disabled { color: #a8adb6; background: #f2f3f5; border-color: #e8eaee; }
-QPushButton#primary { background: #006eff; border-color: #006eff; color: #ffffff; }
-QPushButton#primary:hover { background: #338bff; border-color: #338bff; color: #ffffff; }
-QPushButton#danger { color: #e34b4b; border-color: #f2cccc; }
-QPushButton#danger:hover { background: #fff1f1; border-color: #e89a9a; color: #d93b3b; }
-QPushButton[variant="tool"], QPushButton[variant="card"], QPushButton[variant="nav"] {
-  background: transparent; border: none; padding: 0;
-}
-QLineEdit, QPlainTextEdit, QSpinBox, QDateTimeEdit, QComboBox {
-  background: #ffffff; border: 1px solid #dfe3e9; border-radius: 6px;
-  padding: 8px 10px; selection-background-color: #006eff; color: #1f2329;
-}
-QComboBox::drop-down { border: none; width: 22px; }
-QComboBox QAbstractItemView {
-  background: #ffffff; border: 1px solid #dfe3e9; selection-background-color: #eaf2ff;
-  selection-color: #006eff; outline: 0;
-}
-QListWidget, QTabWidget::pane {
-  background: #ffffff; border: 1px solid #e9ebef; border-radius: 8px;
-}
-QListWidget { padding: 4px; outline: 0; }
-QListWidget::item { padding: 12px 10px; border-bottom: 1px solid #f0f2f5; border-radius: 6px; }
-QListWidget::item:selected { background: #eaf2ff; color: #006eff; }
-QTabWidget::pane { border-top-left-radius: 0; padding: 4px; }
-QTabBar::tab {
-  padding: 9px 22px; background: transparent; color: #8a9099;
-  border-bottom: 2px solid transparent; font-size: 13px;
-}
-QTabBar::tab:selected { color: #006eff; border-bottom-color: #006eff; }
-QCheckBox { spacing: 8px; color: #4b5260; }
-QDialog QLabel#heading { font-size: 18px; }
-QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
-QScrollBar::handle:vertical { background: #c9ced7; border-radius: 4px; min-height: 24px; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QWidget#meetingPage QLabel { color: #e7e9ee; }
-QWidget#meetingPage QLabel#meetingSubtle { color: #8e949f; }
-QWidget#meetingPage QLabel#meetingTitle { color: #f2f4f8; }
-QWidget#meetingPage QLabel#meetingNumber, QWidget#meetingPage QLabel#memberCount {
-  color: #8e949f; font-size: 12px;
-}
-QWidget#meetingPage QComboBox {
-  background: #2a2d34; border: 1px solid #3a3e47; color: #e7e9ee; padding: 6px 10px;
-}
-QWidget#meetingPage QComboBox QAbstractItemView {
-  background: #2a2d34; border: 1px solid #3a3e47; color: #e7e9ee;
-  selection-background-color: #006eff;
-}
-QWidget#meetingPage QPlainTextEdit, QWidget#meetingPage QListWidget {
-  background: #1b1d22; border: 1px solid #30333b; border-radius: 6px; color: #e7e9ee;
-}
-QWidget#meetingPage QListWidget::item { border-bottom: 1px solid #30333b; }
-QWidget#meetingPage QListWidget::item:selected { background: #2b3f61; color: #ffffff; }
-QWidget#meetingPage QTabWidget::pane { background: #22242a; border-color: #30333b; }
-QWidget#meetingPage QTabBar::tab { color: #8e949f; border-bottom-color: transparent; }
-QWidget#meetingPage QTabBar::tab:selected { color: #ffffff; border-bottom-color: #006eff; }
-QWidget#meetingPage QPushButton#sendChat {
-  background: #006eff; border-color: #006eff; color: #ffffff; padding: 8px 18px;
-}
-QWidget#meetingPage QPushButton#previousPage,
-QWidget#meetingPage QPushButton#nextPage {
-  background: #2a2d34; border: 1px solid #3a3e47; color: #e7e9ee; padding: 4px 10px;
-}
-QWidget#meetingPage QLabel#pageLabel { color: #aeb4bf; }
 )");
 }
 

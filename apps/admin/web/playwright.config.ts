@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir: 'tests/e2e', outputDir: 'out/playwright', workers: 1, timeout: 45000, use: {baseURL: 'http://127.0.0.1:3040', headless: true, trace: 'retain-on-failure', screenshot: 'only-on-failure', launchOptions: process.env.AV_CHROME_PATH ? {executablePath: process.env.AV_CHROME_PATH} : {}}, webServer: {command: 'node node_modules/vite/bin/vite.js --host 127.0.0.1', url: 'http://127.0.0.1:3040/apps/admin/', reuseExistingServer: false}});

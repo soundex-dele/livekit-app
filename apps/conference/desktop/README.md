@@ -4,9 +4,9 @@ C++17 + Qt 6 Widgets 的自有会议产品，使用独立 RTC backend、逐轨 G
 
 ## 界面
 
-界面结构对标腾讯会议桌面客户端：首页为左侧导航栏 + 蓝色主操作卡片 + 会议列表 Tab；会中页为深色顶栏、近黑视频舞台（每页九宫格 / 演讲者 / 共享优先）、右侧成员与聊天抽屉，以及图标在上、文字在下的底部工具栏，静音与关闭视频用红色图标反馈；等候室和登录、入会、预约、设置对话框统一浅色卡片风格。窗口变窄时工具栏自动切为纯图标、侧栏收窄。
+首页采用导航栏、左侧会议启动卡和右侧日程面板；会中采用浅色会议信息与成员／聊天面板、深色视频舞台（每页九宫格 / 演讲者 / 共享优先）和固定底部工具栏。等候室、登录、入会、预约、组织输入及操作确认均使用公共 UI 规范。窗口变窄时工具栏自动切为带提示的图标按钮、侧栏收窄。
 
-借鉴的是布局、配色与交互范式，产品仍使用自有品牌「AV 会议」和运行时 QPainter 自绘图标，不包含腾讯会议的商标、图标素材或界面截图。界面实现集中在 `qt/theme.*`（色板、QSS、自绘图标与控件）、`qt/window.cpp`（页面结构）和 `qt/video_widget.cpp`（视频瓦片）；业务、媒体与数据通道逻辑未改动，原有控件 objectName 保持不变以兼容 Qt 组件测试。
+公共主题、表单和弹窗来自 `packages/native/qt` 的 `av_ui_qt`，设计规范见 [全应用 UI 规范](../../../docs/ui-design.md)。会议专用自绘控件和页面样式位于 `qt/theme.*`，页面结构位于 `qt/window.cpp`，视频瓦片位于 `qt/video_widget.cpp`。保留原有控件 objectName、授权和异步关闭行为。
 
 ## 功能
 
@@ -67,6 +67,8 @@ AV_MEETING_SCREENSHOT_DIR="$PWD/out/conference-qt-macos-x86_64/screenshots" \
 ```
 
 Qt Test 通过程序内事件及 `QWidget::render()` 验证页面、输入、布局和截图，不操作用户桌面。offscreen 平台不带字体，程序内截图需挂系统中文字体（Windows 上设 `QT_QPA_FONTDIR=C:/Windows/Fonts`），否则中文会渲染成方框；这不影响真实桌面运行。I420 测试覆盖奇数尺寸、步长、颜色和等比显示；异步测试覆盖最新帧批次及取消后的过期 HTTP 响应。
+
+`conference_widgets_hidpi` 以 `QT_SCALE_FACTOR=2` 启动独立测试进程。`AV_MEETING_SCREENSHOT_DIR` 还会导出紧凑首页、登录、设置、加入会议及字段错误弹窗截图；这些检查属于无窗口自动化，不代表真实显示设备已人工验收。
 
 全链路联调运行 `tests/run_business_integration.py`，参数为 `--client`（`livekit_conference_business_integration`）、`--media-server`（本仓库 `livekit-cpp` 服务）、`--business-server`（Go `business-api`）。测试使用独立数据库、端口与合成媒体，不采集真实设备。
 
