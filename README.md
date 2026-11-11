@@ -33,6 +33,8 @@ AV Platform 的客户端应用仓库。
 
 ## 视频会议、播放器与直播助手
 
+- [FreeCut 剪辑器](apps/freecut/desktop/README.md)：`freecut`，独立 Qt6 Widgets 多轨剪辑应用，支持工程保存、音视频预览和 MP4 导出；通过 `AV_BUILD_FREECUT_DESKTOP=ON` 启用，Windows 构建脚本为 `scripts/build-freecut-windows.ps1`。
+
 - [直播助手](apps/live-studio/desktop/README.md)：`av_live_studio`，Windows / macOS 平台实现、Metal 合成、原生采集和独立 `.app` 打包。
 - [视频会议](apps/conference/desktop/README.md)：`livekit_conference_demo`，保留 Windows/macOS、Retina 适配和 macOS `.app` 打包。
 - [本地播放器](apps/player/desktop/README.md)：`livekit_local_player`，Qt6 Widgets 界面，独立依赖 SDK 播放引擎，无需 WebRTC；构建脚本为 `scripts/build-player-windows.ps1` / `scripts/build-player-macos.sh`。
