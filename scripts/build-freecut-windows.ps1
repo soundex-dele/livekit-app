@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$FFmpegRoot,
     [Parameter(Mandatory = $true)][string]$QtRoot,
     [string]$FFmpegInclude = '',
+    [Parameter(Mandatory = $true)][string]$OpenCVDirectory,
     [string]$BuildDirectory = '',
     [string]$InstallDirectory = '',
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release'
@@ -24,7 +25,7 @@ if (-not $InstallDirectory) { $InstallDirectory = Join-Path $BuildDirectory 'dis
 & cmake -S (Join-Path $appRoot 'apps/freecut/desktop') -B $BuildDirectory -G 'Visual Studio 17 2022' -A x64 `
     -U 'LIVEKIT_FFMPEG_*' -U 'LIVEKIT_EDITOR_FFMPEG_EXECUTABLE' -U 'Qt6*' `
     -DBUILD_TESTING=ON "-DLIVEKIT_FFMPEG_ROOT=$ffmpegPrefix" "-DLIVEKIT_FFMPEG_INCLUDE=$headers" `
-    "-DCMAKE_PREFIX_PATH=$qtPrefix" '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL'
+    "-DCMAKE_PREFIX_PATH=$qtPrefix" "-DOpenCV_DIR=$OpenCVDirectory" '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL'
 if ($LASTEXITCODE -ne 0) { throw 'FreeCut configure failed' }
 & cmake --build $BuildDirectory --config $Configuration --parallel 4
 if ($LASTEXITCODE -ne 0) { throw 'FreeCut build failed' }

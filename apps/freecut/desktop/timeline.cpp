@@ -43,6 +43,16 @@ void Timeline::set_zoom(double zoom) {
 
 void Timeline::set_selected(std::string id) {
   selected_ = std::move(id);
+  selection_.clear();
+  if (!selected_.empty()) {
+    selection_.insert(selected_);
+  }
+  update();
+}
+
+void Timeline::set_media(const std::string& asset, QImage image, std::vector<float> waveform) {
+  thumbnails_[asset] = std::move(image);
+  waveforms_[asset] = std::move(waveform);
   update();
 }
 
@@ -89,7 +99,7 @@ int64_t Timeline::snap(int64_t frame, int64_t duration, int track) const {
 void Timeline::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing);
-  p.fillRect(rect(), QColor("#0B1220"));
+  p.fillRect(rect(), QColor("#18191b"));
   const auto& project = drag_mode_ ? draft_ : project_;
   const auto visible = visibleRegion().boundingRect();
   const double fps = double(project.rate.numerator) / project.rate.denominator;
@@ -99,14 +109,14 @@ void Timeline::paintEvent(QPaintEvent*) {
   for (int n = first; kHeader + n * step * zoom_ * fps < visible.right(); ++n) {
     const int x = kHeader + int(n * step * zoom_ * fps);
     p.drawText(x + 4, 22, QString::number(n * step) + "s");
-    p.setPen(QColor("#26354B"));
+    p.setPen(QColor("#303236"));
     p.drawLine(x, 30, x, height());
     p.setPen(QColor("#ADBCD1"));
   }
   for (int i = 0; i < int(project.tracks.size()); ++i) {
     const auto& track = project.tracks[size_t(i)];
     const int y = kRuler + (int(project.tracks.size()) - i - 1) * kRow;
-    p.fillRect(0, y, kHeader, kRow - 1, QColor("#151F30"));
+    p.fillRect(0, y, kHeader, kRow - 1, QColor("#222426"));
     p.setPen(QColor("#E7EDF7"));
     p.drawText(QRect(10, y + 8, kHeader - 16, 24), Qt::AlignLeft | Qt::AlignVCenter,
                QString::fromStdString(track.name));
@@ -128,17 +138,44 @@ void Timeline::paintEvent(QPaintEvent*) {
         continue;
       }
       p.setBrush(QColor(track.audio_only ? "#24645E" : "#234D85"));
-      p.setPen(
-          QPen(QColor(clip.id == selected_ ? "#93C5FD" : "#3D659B"), clip.id == selected_ ? 2 : 1));
+      p.setPen(QPen(QColor(selection_.count(clip.id) != 0 ? "#93C5FD" : "#3D659B"),
+                    selection_.count(clip.id) != 0 ? 2 : 1));
       p.drawRoundedRect(r.adjusted(1, 1, -1, -1), 5, 5);
       auto a = std::find_if(project.assets.begin(), project.assets.end(),
                             [&](const auto& a) { return a.id == clip.asset_id; });
+      p.save();
+      p.setClipRect(r.adjusted(3, 3, -3, -3));
+      const auto thumbnail = thumbnails_.find(clip.asset_id);
+      if (!track.audio_only && thumbnail != thumbnails_.end() && !thumbnail->second.isNull()) {
+        const auto& img = thumbnail->second;
+        const double w = 64. * img.width() / img.height();
+        for (double x = std::max(r.left(), double(visible.left()));
+             x < std::min(r.right(), double(visible.right())); x += w) {
+          p.drawImage(QRectF(x, r.top(), w, r.height()), img);
+        }
+      }
+      const auto wave = waveforms_.find(clip.asset_id);
+      if (wave != waveforms_.end() && !wave->second.empty() && a != project.assets.end()) {
+        p.setPen(QColor("#65e1c6"));
+        const double total = a->duration_us / 1000000. * fps;
+        for (int x = int(std::max(r.left(), double(visible.left())));
+             x < std::min(r.right(), double(visible.right())); x += 2) {
+          const double source = clip.source_in + (x - r.left()) / zoom_ * clip.speed;
+          const size_t index =
+              size_t(std::clamp(source / std::max(1., total), 0., .999999) * wave->second.size());
+          const double h = wave->second[index] * 16;
+          p.drawLine(QPointF(x, r.bottom() - 18 - h), QPointF(x, r.bottom() - 18 + h));
+        }
+      }
+      p.fillRect(QRectF(r.left(), r.top(), r.width(), 20), QColor(0, 0, 0, 160));
+      p.restore();
       p.setPen(QColor("#E7EDF7"));
       p.save();
       p.setClipRect(r.adjusted(5, 0, -5, 0));
-      p.drawText(
-          r.adjusted(10, 0, -8, 0), Qt::AlignVCenter,
-          a == project.assets.end() ? QStringLiteral("素材缺失") : QString::fromStdString(a->name));
+      p.drawText(r.adjusted(10, 0, -8, 0), Qt::AlignVCenter,
+                 !clip.text.content.empty()  ? QString::fromStdString(clip.text.content)
+                 : a == project.assets.end() ? QStringLiteral("素材缺失")
+                                             : QString::fromStdString(a->name));
       p.restore();
       p.setPen(QColor("#ADBCD1"));
       p.drawLine(r.left() + 4, r.top() + 15, r.left() + 4, r.bottom() - 15);
@@ -150,8 +187,13 @@ void Timeline::paintEvent(QPaintEvent*) {
     p.drawText(QRect(kHeader + 24, kRuler, 460, 100), Qt::AlignVCenter,
                QStringLiteral("添加视频或音频轨道，再将素材拖入时间线"));
   }
+  if (boxing_) {
+    p.setBrush(QColor(85, 222, 200, 35));
+    p.setPen(QColor("#55dec8"));
+    p.drawRect(box_);
+  }
   const int x = kHeader + int(playhead_ * zoom_);
-  p.setPen(QPen(QColor("#FBBF24"), 2));
+  p.setPen(QPen(QColor("#55dec8"), 2));
   p.drawLine(x, 28, x, height());
 }
 
@@ -174,6 +216,23 @@ void Timeline::mousePressEvent(QMouseEvent* e) {
       if (!r.contains(press_)) {
         continue;
       }
+      if (e->modifiers() & Qt::ControlModifier) {
+        if (selection_.count(c.id)) {
+          selection_.erase(c.id);
+        } else {
+          selection_.insert(c.id);
+        }
+        selected_ = c.id;
+        if (select) {
+          select(c.id, track.id);
+        }
+        update();
+        return;
+      }
+      if (!selection_.count(c.id)) {
+        selection_.clear();
+        selection_.insert(c.id);
+      }
       selected_ = c.id;
       if (select) {
         select(c.id, track.id);
@@ -189,6 +248,13 @@ void Timeline::mousePressEvent(QMouseEvent* e) {
       return;
     }
   }
+  if (source_track_ >= 0 && press_.x() >= kHeader) {
+    boxing_ = true;
+    box_ = QRectF(press_, press_);
+    selection_.clear();
+    update();
+    return;
+  }
   if (press_.x() >= kHeader && seek) {
     scrubbing_ = true;
     seek(frame_at(press_.x()));
@@ -196,6 +262,19 @@ void Timeline::mousePressEvent(QMouseEvent* e) {
 }
 
 void Timeline::mouseMoveEvent(QMouseEvent* e) {
+  if (boxing_) {
+    box_ = QRectF(press_, e->position()).normalized();
+    selection_.clear();
+    for (size_t t = 0; t < project_.tracks.size(); ++t) {
+      for (const auto& c : project_.tracks[t].clips) {
+        if (box_.intersects(rect_for(int(t), c))) {
+          selection_.insert(c.id);
+        }
+      }
+    }
+    update();
+    return;
+  }
   if (scrubbing_ && seek) {
     seek(frame_at(e->position().x()));
     return;
@@ -216,24 +295,54 @@ void Timeline::mouseMoveEvent(QMouseEvent* e) {
     if (destination < 0) {
       return;
     }
-    auto c = *it;
-    from.clips.erase(it);
-    c.position = snap(std::max<int64_t>(0, c.position + delta), c.duration, destination);
-    draft_.tracks[size_t(destination)].clips.push_back(std::move(c));
+    const int64_t shift =
+        snap(std::max<int64_t>(0, it->position + delta), it->duration, destination) - it->position;
+    const int track_shift = destination - source_track_;
+    std::vector<std::pair<int, EditorClip>> moving;
+    for (int t = 0; t < int(draft_.tracks.size()); ++t) {
+      auto& clips = draft_.tracks[t].clips;
+      for (auto iter = clips.begin(); iter != clips.end();) {
+        if (!selection_.count(iter->id)) {
+          ++iter;
+          continue;
+        }
+        const int target = t + track_shift;
+        if (target < 0 || target >= int(draft_.tracks.size()) || iter->position + shift < 0) {
+          draft_ = project_;
+          update();
+          return;
+        }
+        auto clip = *iter;
+        clip.position += shift;
+        moving.push_back({target, clip});
+        iter = clips.erase(iter);
+      }
+    }
+    for (auto& item : moving) {
+      draft_.tracks[item.first].clips.push_back(std::move(item.second));
+    }
   } else if (drag_mode_ == 2) {
-    const auto offset =
-        std::clamp<int64_t>(delta, -std::min(it->source_in, it->position), it->duration - 1);
+    const auto offset = std::clamp<int64_t>(
+        delta, -std::min(int64_t(std::floor(it->source_in / it->speed)), it->position),
+        it->duration - 1);
     it->position += offset;
-    it->source_in += offset;
+    it->source_in += int64_t(std::llround(offset * it->speed));
     it->duration -= offset;
+    editor_retime(*it, offset);
   } else {
     it->duration = std::max<int64_t>(1, it->duration + delta);
+    editor_retime(*it, 0);
   }
   update();
 }
 
 void Timeline::mouseReleaseEvent(QMouseEvent* e) {
   scrubbing_ = false;
+  if (boxing_) {
+    boxing_ = false;
+    update();
+    return;
+  }
   if (!drag_mode_) {
     return;
   }

@@ -2,6 +2,9 @@
 #include "livekit/editor.hpp"
 #include <QWidget>
 #include <functional>
+#include <set>
+#include <map>
+#include <QImage>
 
 namespace freecut {
 class Timeline final : public QWidget {
@@ -15,6 +18,12 @@ class Timeline final : public QWidget {
   std::function<void(std::string, std::string)> select;
   std::function<void(livekit::sdk::EditorProject)> edit;
   std::function<void(std::string, std::string, int64_t)> insert;
+
+  const std::set<std::string>& selection() const {
+    return selection_;
+  }
+
+  void set_media(const std::string& asset, QImage image, std::vector<float> waveform);
   bool snapping = true;
 
  protected:
@@ -36,6 +45,11 @@ class Timeline final : public QWidget {
   int drag_mode_ = 0, source_track_ = -1;
   bool scrubbing_ = false;
   QPointF press_;
+  bool boxing_ = false;
+  QRectF box_;
+  std::set<std::string> selection_;
+  std::map<std::string, QImage> thumbnails_;
+  std::map<std::string, std::vector<float>> waveforms_;
   int64_t playhead_ = 0;
   double zoom_ = 3;
 };

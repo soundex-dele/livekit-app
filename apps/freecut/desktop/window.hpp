@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <deque>
 #include <mutex>
+#include <map>
 
 class QCheckBox;
 class QComboBox;
@@ -14,6 +15,9 @@ class QProgressBar;
 class QPushButton;
 class QSpinBox;
 class QTimer;
+class QLineEdit;
+class QPlainTextEdit;
+class QFormLayout;
 
 namespace freecut {
 class Timeline;
@@ -30,6 +34,8 @@ class Window final : public QMainWindow {
   bool save_path(const QString& path);
   void export_path(const QString& path);
   bool exporting() const;
+  bool import_subtitles_path(const QString& path);
+  bool export_subtitles_path(const QString& path);
   void seek_frame(int64_t frame);
 
  signals:
@@ -71,6 +77,30 @@ class Window final : public QMainWindow {
   bool confirm_save();
   void new_project();
   void build_ui();
+  void build_effect_properties(QFormLayout* form);
+  void add_text();
+  void import_subtitles();
+  void export_subtitles();
+  void copy_clips();
+  void paste_clips();
+  void filter_assets();
+  void update_effect_properties(const livekit::sdk::EditorClip* clip, bool enabled);
+  void apply_effect_properties(livekit::sdk::EditorClip& clip);
+  void set_transition(const std::string& effect);
+  QFormLayout* property_form_ = nullptr;
+  std::map<std::string, QDoubleSpinBox*> effects_;
+  QPlainTextEdit* text_content_ = nullptr;
+  QLineEdit* text_font_ = nullptr;
+  QLineEdit* text_color_ = nullptr;
+  QComboBox* text_alignment_ = nullptr;
+  QComboBox* key_property_ = nullptr;
+  QComboBox* key_interpolation_ = nullptr;
+  QLineEdit* search_ = nullptr;
+  QComboBox* asset_type_ = nullptr;
+  QCheckBox* magnetic_ = nullptr;
+  std::vector<livekit::sdk::EditorClip> clipboard_;
+  std::vector<int> clipboard_tracks_;
+
   livekit::sdk::EditorDocument document_;
   std::unique_ptr<livekit::sdk::EditorSession> session_;
   std::unique_ptr<livekit::sdk::EditorExport> exporter_;

@@ -6,8 +6,8 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| FreeCut 独立配置、编译、测试 | 9/9 CTest 通过 |
-| 根工程同时构建 FreeCut 和播放器 | 构建通过，15/15 CTest 通过 |
+| FreeCut 独立配置、编译、测试 | 10/10 CTest 通过 |
+| 根工程同时构建 FreeCut 和播放器 | 构建通过，16/16 CTest 通过 |
 | 编辑模型 | 分割、裁剪、跨轨移动、重叠拒绝、锁定保护、撤销重做和保存状态通过 |
 | 工程文件 | 版本化 JSON、往返保存、缺失素材引用保留、无效输入拒绝通过 |
 | 时间线媒体 | 暂停定位、200 次连续定位合并、片段边界、空隙黑画面/静音、延迟视频时间戳及连续播放通过 |
@@ -29,6 +29,23 @@
 - 空工程、编辑工作区和 HiDPI 截图：`out/freecut/screenshots/`。
 - 合成媒体、实际导出文件：`out/freecut/sdk/src/engines/editor/fixtures/`。
 - 可运行部署程序：`out/freecut/dist/bin/freecut.exe`。分发时需要携带整个 `dist` 目录。
+
+## 本轮专业版布局与功能重构验证
+
+2026-11-11 更新，使用 OpenCV 4.10 和 nndeploy-flow 原生媒体目标，模型与 Python 服务均未启用。
+
+- 工程 v2 保存/读取、v1 非磁吸迁移、未来版本拒绝、主轨闭隙和一次事务撤销通过。
+- 动画分割切点连续性、效果参数往返、非法转场余量拒绝通过。
+- 原生 ColorGrade 的去饱和像素检查、Transition 的首尾和中间混合像素检查通过。
+- 原生 TimeStretch 在 2× 速度下保持 440 Hz 测试音高；音频重新定位与新会话渲染一致。
+- FFmpeg/libass 实际渲染 `FreeCut 中文`，字幕改变输出像素；实际 MP4 重新解码与预览画面的平均差异在有损编码容差内。
+- Qt 离屏覆盖 SRT 中文往返、无效时间拒绝、Ctrl 多选拖动的一次事务与撤销、框选，以及原有编辑、拖放和 1×/2× 截图检查。
+- 每个 RenderGraph 独立持有 EffectSession；同参数节点图在会话内复用，每类最多 8 个。图像转换和音频分块仍使用 CPU，未进行大型工程或 4K 实时性能验收。
+- Windows 构建脚本完成编译、10/10 CTest、Qt/FFmpeg/OpenCV/MSVC 依赖安装和安装程序隐藏启动。安装程序加载带中文字的工程并输出 `screenshots/advanced-deployed.png`，退出码为 0。
+- 联合构建 16/16 CTest 通过；播放器测试需要 Qt `bin` 加入 PATH 和 `QT_QPA_FONTDIR`。第一次直接运行缺少 Qt DLL 搜索路径而失败，补齐测试环境后通过，无需修改播放器代码。
+- clang-format 20.1.8、Git 空白检查和 SDK 禁异常契约检查通过。第三方适配文件单独编译，只捕获外部异常，项目自身错误使用显式返回值。
+
+可编辑的综合测试工程和导出视频位于 `out/freecut/sdk/src/engines/editor/fixtures/advanced.freecut.json` 与 `advanced.mp4`。素材为合成测试媒体，不代表真实摄影素材的主观质量验收。
 
 ## 尚需人工及其他平台验证
 

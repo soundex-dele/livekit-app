@@ -2,6 +2,11 @@
 #include "timeline.hpp"
 #include <av/ui.hpp>
 #include <QAction>
+#include <QLineEdit>
+#include <QSettings>
+#include <QTabWidget>
+#include <QSignalBlocker>
+#include <cmath>
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -16,6 +21,8 @@
 #include <QMenuBar>
 #include <QMenu>
 #include <QMimeData>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QPainter>
 #include <QProgressBar>
 #include <QPushButton>
@@ -50,7 +57,12 @@ class AssetList final : public QListWidget {
   explicit AssetList(QWidget* parent) : QListWidget(parent) {
     setDragEnabled(true);
     setIconSize({96, 54});
-    setSpacing(6);
+    setSpacing(8);
+    setViewMode(QListView::IconMode);
+    setResizeMode(QListView::Adjust);
+    setMovement(QListView::Static);
+    setGridSize({120, 92});
+    setWordWrap(true);
   }
 
  protected:
@@ -93,6 +105,9 @@ class Preview final : public QWidget {
     update();
   }
 
+  std::function<void(double, double, double)> transform;
+  bool editable = false;
+
   void clear_image() {
     image_ = {};
     setProperty("hasFrame", false);
@@ -100,6 +115,38 @@ class Preview final : public QWidget {
   }
 
  protected:
+  void mousePressEvent(QMouseEvent* event) override {
+    if (!editable || event->button() != Qt::LeftButton) {
+      return;
+    }
+    press_ = event->position();
+    dragging_ = true;
+  }
+
+  void mouseReleaseEvent(QMouseEvent* event) override {
+    if (!dragging_) {
+      return;
+    }
+    dragging_ = false;
+    if (!image_.isNull() && transform) {
+      QSize size = image_.size();
+      size.scale(this->size(), Qt::KeepAspectRatio);
+      const auto delta = event->position() - press_;
+      if (delta.manhattanLength() >= 3) {
+        transform(delta.x() / size.width(), delta.y() / size.height(), 1);
+      }
+    }
+  }
+
+  void wheelEvent(QWheelEvent* event) override {
+    if (editable && transform && event->modifiers() & Qt::ControlModifier) {
+      transform(0, 0, event->angleDelta().y() > 0 ? 1.05 : 1 / 1.05);
+      event->accept();
+    } else {
+      event->ignore();
+    }
+  }
+
   void paintEvent(QPaintEvent*) override {
     QPainter p(this);
     p.fillRect(rect(), QColor("#050912"));
@@ -116,6 +163,8 @@ class Preview final : public QWidget {
 
  private:
   QImage image_;
+  QPointF press_;
+  bool dragging_ = false;
 };
 
 Window::Window(bool silent) : silent_(silent) {
@@ -125,6 +174,19 @@ Window::Window(bool silent) : silent_(silent) {
   setMinimumSize(1000, 680);
   av::ui::apply_theme(this, av::ui::Theme::Dark);
   build_ui();
+  setStyleSheet(
+      styleSheet() +
+      QStringLiteral(
+          "QMainWindow, QWidget#freecutWindow { background: #151617; color: #e5e7eb; }"
+          "QSplitter::handle { background: #101112; width: 5px; height: 5px; }"
+          "QListWidget, QScrollArea, QPlainTextEdit { background: #1d1e20; border: 1px solid "
+          "#303236; }"
+          "QTabWidget::pane { border: 0; } QTabBar::tab { padding: 10px 14px; background: #1d1e20; "
+          "}"
+          "QTabBar::tab:selected { color: #55dec8; border-bottom: 2px solid #55dec8; }"
+          "QPushButton { border-radius: 5px; padding: 6px 10px; }"
+          "QPushButton#exportMp4 { background: #56dec9; color: #10211f; font-weight: bold; }"
+          "QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus { border: 1px solid #55dec8; }"));
   session_ = std::make_unique<EditorSession>(EditorCallbacks{
       [this](auto frame) {
         std::lock_guard lock(mailbox_mutex_);
@@ -159,6 +221,12 @@ Window::Window(bool silent) : silent_(silent) {
 }
 
 Window::~Window() {
+  if (!silent_) {
+    QSettings settings("FreeCut", "Editor");
+    for (auto* splitter : findChildren<QSplitter*>()) {
+      settings.setValue(splitter->objectName(), splitter->saveState());
+    }
+  }
   poll_timer_->stop();
   exporter_->cancel();
   exporter_.reset();
@@ -227,6 +295,8 @@ void Window::build_ui() {
       refresh();
     }
   });
+  action(edit, QStringLiteral("复制片段"), QKeySequence::Copy, [this] { copy_clips(); });
+  action(edit, QStringLiteral("粘贴片段"), QKeySequence::Paste, [this] { paste_clips(); });
   action(edit, QStringLiteral("分割片段"), QKeySequence("Ctrl+B"),
          [this] { edited(document_.split(selected_clip_, position_, id())); });
   action(edit, QStringLiteral("删除片段"), QKeySequence::Delete, [this] { remove_selected(); });
@@ -267,6 +337,19 @@ void Window::build_ui() {
   zoom->setObjectName("timelineZoom");
   toolbar->addWidget(new QLabel(QStringLiteral("时间线缩放"), this));
   toolbar->addWidget(zoom);
+  magnetic_ = new QCheckBox(QStringLiteral("主轨磁吸"), this);
+  magnetic_->setObjectName("mainMagnetic");
+  toolbar->addWidget(magnetic_);
+  connect(magnetic_, &QCheckBox::clicked, this, [this](bool on) {
+    auto p = document_.project();
+    p.magnetic = on;
+    edited(document_.edit(std::move(p)));
+  });
+  button(QStringLiteral("适配"), "fitTimeline", [this, zoom] {
+    zoom->setValue(
+        int(100. * std::max(0.1, (width() - 180.) /
+                                     std::max<int64_t>(1, editor_duration(document_.project())))));
+  });
   toolbar->addStretch();
   export_button_ = button(QStringLiteral("导出 MP4"), "exportMp4", [this] {
     const auto path =
@@ -278,16 +361,80 @@ void Window::build_ui() {
   av::ui::set_button_role(export_button_, av::ui::ButtonRole::Primary);
   layout->addLayout(toolbar);
   auto* vertical = new QSplitter(Qt::Vertical, root);
+  vertical->setObjectName("verticalLayout");
   auto* workspace = new QSplitter(Qt::Horizontal, vertical);
+  workspace->setObjectName("workspaceLayout");
   auto* library = new QWidget(workspace);
   auto* lib = new QVBoxLayout(library);
   lib->setContentsMargins(0, 0, 8, 0);
-  auto* heading = new QLabel(QStringLiteral("素材库"), library);
+  auto* heading = new QLabel(QStringLiteral("FreeCut  /  创作工作台"), library);
   av::ui::set_text_role(heading, "section");
   lib->addWidget(heading);
-  assets_ = new AssetList(library);
+  auto* tabs = new QTabWidget(library);
+  tabs->setObjectName("libraryTabs");
+  lib->addWidget(tabs, 1);
+  auto* media = new QWidget(tabs);
+  auto* media_layout = new QVBoxLayout(media);
+  search_ = new QLineEdit(media);
+  search_->setPlaceholderText(QStringLiteral("搜索素材"));
+  search_->setObjectName("assetSearch");
+  search_->setAccessibleName(QStringLiteral("搜索素材"));
+  media_layout->addWidget(search_);
+  asset_type_ = new QComboBox(media);
+  asset_type_->addItems({QStringLiteral("全部"), QStringLiteral("视频"), QStringLiteral("音频"),
+                         QStringLiteral("图片")});
+  media_layout->addWidget(asset_type_);
+  connect(search_, &QLineEdit::textChanged, this, &Window::filter_assets);
+  connect(asset_type_, &QComboBox::currentIndexChanged, this, &Window::filter_assets);
+  tabs->addTab(media, QStringLiteral("媒体"));
+  auto page = [&](const QString& title) {
+    auto* widget = new QWidget(tabs);
+    auto* box = new QVBoxLayout(widget);
+    tabs->addTab(widget, title);
+    return box;
+  };
+  auto entry = [&](QVBoxLayout* box, const QString& title, auto fn) {
+    auto* b = new QPushButton(title, this);
+    box->addWidget(b);
+    connect(b, &QPushButton::clicked, this, fn);
+  };
+  auto* audio_page = page(QStringLiteral("音频"));
+  entry(audio_page, QStringLiteral("导入音频…"), import);
+  entry(audio_page, QStringLiteral("查看音频素材"), [this, tabs] {
+    asset_type_->setCurrentIndex(2);
+    tabs->setCurrentIndex(0);
+  });
+  audio_page->addWidget(new QLabel(QStringLiteral("选择片段后，在右侧调整音量与淡入淡出。"), this));
+  audio_page->addStretch();
+  auto* text_page = page(QStringLiteral("文本"));
+  entry(text_page, QStringLiteral("添加文本"), [this] { add_text(); });
+  entry(text_page, QStringLiteral("导入 SRT 字幕…"), [this] { import_subtitles(); });
+  entry(text_page, QStringLiteral("导出 SRT 字幕…"), [this] { export_subtitles(); });
+  text_page->addStretch();
+  auto* transitions = page(QStringLiteral("转场"));
+  entry(transitions, QStringLiteral("叠化"), [this] { set_transition("fade"); });
+  entry(transitions, QStringLiteral("擦除"), [this] { set_transition("wipe"); });
+  entry(transitions, QStringLiteral("推拉"), [this] { set_transition("slide"); });
+  entry(transitions, QStringLiteral("移除转场"), [this] { set_transition(""); });
+  transitions->addStretch();
+  auto* colors = page(QStringLiteral("调色"));
+  colors->addWidget(
+      new QLabel(QStringLiteral("选择视频或图片，在右侧调整亮度、对比度、饱和度与色温。"), this));
+  entry(colors, QStringLiteral("重置调色"), [this] {
+    auto p = document_.project();
+    for (auto& t : p.tracks) {
+      for (auto& c : t.clips) {
+        if (c.id == selected_clip_) {
+          c.color = {};
+        }
+      }
+    }
+    edited(document_.edit(std::move(p)));
+  });
+  colors->addStretch();
+  assets_ = new AssetList(media);
   assets_->setObjectName("assetList");
-  lib->addWidget(assets_);
+  media_layout->addWidget(assets_);
   auto* add = new QPushButton(QStringLiteral("插入到播放头"), library);
   add->setObjectName("insertAsset");
   lib->addWidget(add);
@@ -299,7 +446,39 @@ void Window::build_ui() {
   auto* center = new QWidget(workspace);
   auto* preview_layout = new QVBoxLayout(center);
   preview_layout->setContentsMargins(4, 0, 4, 0);
+  auto* player_header = new QHBoxLayout;
+  player_header->addWidget(new QLabel(QStringLiteral("播放器"), center));
+  player_header->addStretch();
+  auto* ratio = new QComboBox(center);
+  ratio->setObjectName("canvasRatio");
+  ratio->addItems({QStringLiteral("画布比例"), "16:9", "9:16", "1:1", "4:3"});
+  connect(ratio, &QComboBox::activated, this, [this](int index) {
+    if (!index) {
+      return;
+    }
+    auto p = document_.project();
+    const std::pair<int, int> sizes[] = {{1920, 1080}, {1080, 1920}, {1080, 1080}, {1440, 1080}};
+    p.width = sizes[index - 1].first;
+    p.height = sizes[index - 1].second;
+    edited(document_.edit(std::move(p)));
+  });
+  player_header->addWidget(ratio);
+  preview_layout->addLayout(player_header);
   preview_ = new Preview(center);
+  preview_->setToolTip(QStringLiteral("拖动调整所选片段位置；Ctrl + 滚轮缩放"));
+  preview_->transform = [this](double dx, double dy, double scale) {
+    auto p = document_.project();
+    for (auto& t : p.tracks) {
+      for (auto& c : t.clips) {
+        if (c.id == selected_clip_) {
+          c.x = std::clamp(c.x + dx, -4., 4.);
+          c.y = std::clamp(c.y + dy, -4., 4.);
+          c.scale = std::clamp(c.scale * scale, .01, 8.);
+        }
+      }
+    }
+    edited(document_.edit(std::move(p)));
+  };
   preview_layout->addWidget(preview_, 1);
   auto* transport = new QHBoxLayout;
   play_ = new QPushButton(QStringLiteral("播放"), center);
@@ -381,6 +560,10 @@ void Window::build_ui() {
   form->addRow(delete_track);
   connect(delete_track, &QPushButton::clicked, this, [this] {
     auto p = document_.project();
+    if (p.main_track_id == selected_track_) {
+      p.main_track_id.clear();
+      p.magnetic = false;
+    }
     p.tracks.erase(std::remove_if(p.tracks.begin(), p.tracks.end(),
                                   [&](const auto& t) { return t.id == selected_track_; }),
                    p.tracks.end());
@@ -411,12 +594,13 @@ void Window::build_ui() {
   scale_ = number(QStringLiteral("缩放"), "clipScale", .01, 8, 1);
   opacity_ = number(QStringLiteral("透明度"), "clipOpacity", 0, 1, 1);
   volume_ = number(QStringLiteral("音量"), "clipVolume", 0, 4, 1);
+  build_effect_properties(form);
   auto* apply = new QPushButton(QStringLiteral("应用片段属性"), properties);
   apply->setObjectName("applyProperties");
   form->addRow(apply);
   connect(apply, &QPushButton::clicked, this, &Window::apply_properties);
   properties_scroll->setWidget(properties);
-  workspace->setSizes({250, 850, 280});
+  workspace->setSizes({400, 700, 280});
   auto* timeline_scroll = new QScrollArea(vertical);
   timeline_scroll->setWidgetResizable(true);
   timeline_ = new Timeline(timeline_scroll);
@@ -452,6 +636,12 @@ void Window::build_ui() {
   notice_->setTextFormat(Qt::PlainText);
   layout->addWidget(notice_);
   setCentralWidget(root);
+  if (!silent_) {
+    QSettings settings("FreeCut", "Editor");
+    for (auto* splitter : findChildren<QSplitter*>()) {
+      splitter->restoreState(settings.value(splitter->objectName()).toByteArray());
+    }
+  }
 }
 
 void Window::fail(Failure error) {
@@ -495,6 +685,10 @@ void Window::refresh() {
   pause();
   ++generation_;
   const auto& p = document_.project();
+  {
+    QSignalBlocker blocker(magnetic_);
+    magnetic_->setChecked(p.magnetic);
+  }
   if (editor_duration(p) == 0) {
     preview_->clear_image();
   }
@@ -519,6 +713,7 @@ void Window::refresh() {
         text(a.name) + (missing ? QStringLiteral(" [缺失]") : ""), assets_);
     item->setData(Qt::UserRole, text(a.id));
     item->setToolTip(text(a.path));
+    item->setData(Qt::UserRole + 1, a.image ? 3 : a.video ? 1 : 2);
     if (text(a.id) == previous) {
       assets_->setCurrentItem(item);
     }
@@ -526,6 +721,7 @@ void Window::refresh() {
   if (!assets_->currentItem() && assets_->count()) {
     assets_->setCurrentRow(0);
   }
+  filter_assets();
   setWindowTitle(text(p.name) + (document_.dirty() ? " *" : "") + " — FreeCut");
   refresh_properties();
   observe(session_->set_project(p, generation_, position_),
@@ -552,6 +748,8 @@ void Window::new_project() {
   EditorProject p;
   p.tracks = {{id(), "视频 1", false, false, false, false, {}},
               {id(), "音频 1", true, false, false, false, {}}};
+  p.main_track_id = p.tracks[0].id;
+  p.magnetic = true;
   selected_track_ = p.tracks[0].id;
   auto result = document_.replace(std::move(p));
   if (!result) {
@@ -584,6 +782,7 @@ void Window::import_path(const QString& path) {
     }
     const auto asset_id = result->asset.id;
     const auto icon = QIcon(QPixmap::fromImage(image(result->thumbnail)));
+    timeline_->set_media(asset_id, image(result->thumbnail), result->waveform);
     p.assets.push_back(result->asset);
     edited(document_.edit(std::move(p)));
     for (int i = 0; i < assets_->count(); ++i) {
@@ -659,7 +858,11 @@ void Window::remove_selected() {
   auto p = document_.project();
   for (auto& t : p.tracks) {
     t.clips.erase(std::remove_if(t.clips.begin(), t.clips.end(),
-                                 [&](const auto& c) { return c.id == selected_clip_; }),
+                                 [&](const auto& c) {
+                                   return timeline_->selection().empty()
+                                              ? c.id == selected_clip_
+                                              : timeline_->selection().count(c.id) != 0;
+                                 }),
                   t.clips.end());
   }
   edited(document_.edit(std::move(p)));
@@ -712,6 +915,8 @@ void Window::refresh_properties() {
     opacity_->setValue(clip->opacity);
     volume_->setValue(clip->volume);
   }
+  preview_->editable = clip && track && !track->locked && !track->audio_only;
+  update_effect_properties(clip, clip && track && !track->locked);
   updating_ = false;
 }
 
@@ -730,14 +935,21 @@ void Window::apply_properties() {
   if (!selected) {
     return;
   }
+  const int64_t trim_offset =
+      int64_t(std::llround((source_input_->value() - selected->source_in) / selected->speed));
+  const bool trimmed = trim_offset != 0 || duration_input_->value() != selected->duration;
   selected->position = position_input_->value();
   selected->source_in = source_input_->value();
   selected->duration = duration_input_->value();
+  if (trimmed) {
+    editor_retime(*selected, trim_offset);
+  }
   selected->x = x_->value();
   selected->y = y_->value();
   selected->scale = scale_->value();
   selected->opacity = opacity_->value();
   selected->volume = volume_->value();
+  apply_effect_properties(*selected);
   const auto destination = tracks_->currentData().toString().toStdString();
   for (auto& t : p.tracks) {
     if (t.id == destination) {
@@ -917,6 +1129,8 @@ void Window::load_thumbnails(size_t index, uint64_t epoch) {
         auto* item = assets_->item(row);
         if (item->data(Qt::UserRole).toString() == text(asset.id)) {
           item->setIcon(QIcon(QPixmap::fromImage(image(result->thumbnail))));
+          timeline_->set_media(item->data(Qt::UserRole).toString().toStdString(),
+                               image(result->thumbnail), result->waveform);
         }
       }
     }

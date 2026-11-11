@@ -3,6 +3,9 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QDir>
+#include <QFile>
+#include <QLineEdit>
+#include <QComboBox>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
@@ -30,9 +33,77 @@ class UiTests : public QObject {
                                QString::number(window.devicePixelRatioF()) + ".png"));
   }
 
+  void multiselect() {
+    using namespace livekit::sdk;
+    EditorProject p;
+    p.assets = {{"asset", "sample", "sample.mp4", 5000000, 160, 90, true, false, false}};
+    p.tracks = {{"v",
+                 "Video",
+                 false,
+                 false,
+                 false,
+                 false,
+                 {{"a", "asset", 10, 0, 20}, {"b", "asset", 50, 0, 20}}}};
+    freecut::Timeline timeline;
+    timeline.snapping = false;
+    timeline.set_project(p);
+    timeline.show();
+    EditorDocument document;
+    QVERIFY(document.replace(p));
+    int edits = 0;
+    timeline.edit = [&](auto next) {
+      QVERIFY(document.edit(std::move(next)));
+      ++edits;
+    };
+    QTest::mouseClick(&timeline, Qt::LeftButton, {}, {184, 60});
+    QTest::mouseClick(&timeline, Qt::LeftButton, Qt::ControlModifier, {304, 60});
+    QCOMPARE(timeline.selection().size(), size_t(2));
+    QTest::mousePress(&timeline, Qt::LeftButton, {}, {184, 60});
+    QTest::mouseMove(&timeline, {214, 60});
+    QTest::mouseRelease(&timeline, Qt::LeftButton, {}, {214, 60});
+    QCOMPARE(edits, 1);
+    QCOMPARE(document.project().tracks[0].clips[0].position, int64_t(20));
+    QCOMPARE(document.project().tracks[0].clips[1].position, int64_t(60));
+    QVERIFY(document.undo());
+    QCOMPARE(document.project().tracks[0].clips[0].position, int64_t(10));
+    QCOMPARE(document.project().tracks[0].clips[1].position, int64_t(50));
+    timeline.set_project(p);
+    QTest::mousePress(&timeline, Qt::LeftButton, {}, {140, 95});
+    QTest::mouseMove(&timeline, {340, 38});
+    QTest::mouseRelease(&timeline, Qt::LeftButton, {}, {340, 38});
+    QCOMPARE(timeline.selection().size(), size_t(2));
+    QCOMPARE(edits, 1);
+  }
+
+  void subtitles() {
+    freecut::Window window(true);
+    const auto path = QString(FREECUT_SCREENSHOTS) + "/captions.srt";
+    QDir().mkpath(FREECUT_SCREENSHOTS);
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(QStringLiteral("1\n00:00:00,000 --> 00:00:01,000\n中文字幕\n\n2\n00:00:01,000 --> "
+                              "00:00:02,000\nSecond line\n")
+                   .toUtf8());
+    file.close();
+    QVERIFY(window.import_subtitles_path(path));
+    QCOMPARE(window.document().project().tracks.back().clips.size(), size_t(2));
+    QVERIFY(window.export_subtitles_path(path + ".roundtrip.srt"));
+    freecut::Window loaded(true);
+    QVERIFY(loaded.import_subtitles_path(path + ".roundtrip.srt"));
+    QCOMPARE(loaded.document().project().tracks.back().clips[0].text.content,
+             std::string("中文字幕"));
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write("1\n00:90:00,000 --> 00:00:01,000\nBad\n");
+    file.close();
+    const auto before = loaded.document().project().tracks.size();
+    QVERIFY(!loaded.import_subtitles_path(path));
+    QCOMPARE(loaded.document().project().tracks.size(), before);
+  }
+
   void editing() {
     freecut::Window window(true);
     window.show();
+    QTest::mouseClick(window.findChild<QCheckBox*>("mainMagnetic"), Qt::LeftButton);
     QSignalSpy imported(&window, &freecut::Window::imported);
     window.import_path(QString(FREECUT_FIXTURES) + "/red.mp4");
     QTRY_COMPARE_WITH_TIMEOUT(imported.count(), 1, 10000);
