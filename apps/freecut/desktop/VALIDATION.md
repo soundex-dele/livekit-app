@@ -47,6 +47,22 @@
 
 可编辑的综合测试工程和导出视频位于 `out/freecut/sdk/src/engines/editor/fixtures/advanced.freecut.json` 与 `advanced.mp4`。素材为合成测试媒体，不代表真实摄影素材的主观质量验收。
 
+## 2026-11-13 热重载与算法平铺验证
+
+- Release 构建 `livekit_editor_tests`、`freecut_ui_tests` 和 `freecut` 成功；独立构建目录 `out/freecut` 的 **11/11 CTest 通过**。本轮未重新执行安装/部署或联合播放器构建。
+- `editor_hot_reload` 检查真实主 GraphEngine 内的节点与边：ColorGrade、饱和度/对比度、Transition、TimeStretch、AudioFade 及独立格式转换节点；添加、参数替换、移除、重新添加和删除所属片段均通过。
+- 同参数算法与转换节点实例复用；改变亮度仅替换 ColorGrade，改变转场算法保留转换器；无效果工程保留 7 个公共阶段（含片段路由和结果路由）。
+- 热图与新建图逐帧 RGBA 相同、PCM 平均绝对差小于 0.0001；覆盖调色、两片段隔离、转场、变速、淡入、文字修改、画布/帧率/源位置修改以及素材重新定位。
+- 未变素材的解码器保留；同 ID 改路径、同路径改文件时间戳、移除素材会失效或回收旧解码器。重复与重叠音频请求、AAC 开头预热包的复用回归通过。
+- Session 更新后从新 generation 的下一帧续播，无重复帧、旧 generation 回流；无效更新保留旧工程，末尾更新触发一次结束事件。
+- Qt offscreen 测试在播放中选择片段、添加和移除调色效果、连续编辑透明度后帧号仍推进；暂停编辑保持暂停，打开另一个工程暂停。原有多轨、导出和 1×/2× 离屏测试通过。
+- clang-format 20.1.8、Git 空白检查与 SDK 禁异常契约检查通过；nndeploy/OpenCV 仍只在私有适配库中处理异常，编辑器主体保持禁异常编译。
+
+- 后续图调度重构：decode 不再调用算法入口。测试检查 `decode → route → 转换/算法 → composite`、调色到变速/AudioWindow 的连续连接以及 `result_route → TransitionJoin → 转场 → TransitionCommit → output`；不存在 decode 直达 composite 的旁路。
+- 算法边与缓存旁路声明不同事件类型，覆盖变速缓存命中、隐藏画面、静音、同帧转场双输入汇合；文字缓存继续受 8 张/128 MiB 上限约束。
+
+本轮日志：`out/freecut/Testing/Temporary/LastTest.log`；合成媒体和导出结果位于 `out/freecut/sdk/src/engines/editor/fixtures/`（路径相对 livekit-app）。所有验证均为自动化，无桌面操作或真实音频设备人工验收。播放状态连续不等于无声学间隙；重载和 PCM 重置期间的设备听感、复杂工程实时性仍待人工/性能验证。
+
 ## 尚需人工及其他平台验证
 
 自动化没有操作用户桌面或打开音频设备。真实扬声器输出与延迟、显示设备、跨屏 DPI、系统文件对话框需要单独人工验收。macOS/Linux 本次未构建或验收。软件合成和编码尚未进行大型工程性能基准测试。

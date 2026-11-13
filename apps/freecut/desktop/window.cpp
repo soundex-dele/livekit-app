@@ -190,6 +190,10 @@ Window::Window(bool silent) : silent_(silent) {
   session_ = std::make_unique<EditorSession>(EditorCallbacks{
       [this](auto frame) {
         std::lock_guard lock(mailbox_mutex_);
+        delivered_generation_ = frame->generation;
+        if (frame->generation != mailbox_generation_) {
+          return;
+        }
         const size_t frame_bytes = frame->image.rgba.size() + frame->audio.size() * sizeof(float);
         size_t bytes = 0;
         for (const auto& item : pending_) {
@@ -207,10 +211,12 @@ Window::Window(bool silent) : silent_(silent) {
       [this](Failure error) {
         std::lock_guard lock(mailbox_mutex_);
         pending_error_ = std::move(error);
+        error_generation_ = delivered_generation_;
       },
       [this] {
         std::lock_guard lock(mailbox_mutex_);
         ended_ = true;
+        ended_generation_ = delivered_generation_;
       }});
   exporter_ = std::make_unique<EditorExport>();
   new_project();
@@ -681,10 +687,27 @@ void Window::edited(Result<void> result) {
   refresh();
 }
 
-void Window::refresh() {
-  pause();
-  ++generation_;
+void Window::refresh(bool pause_playback) {
   const auto& p = document_.project();
+  if (pause_playback || editor_duration(p) == 0) {
+    pause();
+  } else if (playing_) {
+    // Drop old PCM without closing the output device. New frames carry the new
+    // project generation; editing keeps the play button and session running.
+    if (!silent_) {
+      audio_.reset();
+    }
+    playback_finished_ = false;
+  }
+  ++generation_;
+  {
+    std::lock_guard lock(mailbox_mutex_);
+    mailbox_generation_ = generation_;
+    pending_.clear();
+    pending_error_.reset();
+    ended_ = false;
+    overflow_ = false;
+  }
   {
     QSignalBlocker blocker(magnetic_);
     magnetic_->setChecked(p.magnetic);
@@ -724,12 +747,13 @@ void Window::refresh() {
   filter_assets();
   setWindowTitle(text(p.name) + (document_.dirty() ? " *" : "") + " — FreeCut");
   refresh_properties();
-  observe(session_->set_project(p, generation_, position_),
+  observe(session_->set_project(p, generation_, position_, playing_),
           [this, generation = generation_](auto result) {
             if (generation != generation_) {
               return;
             }
             if (!result) {
+              pause();
               fail(result.failure_record());
             }
           });
@@ -756,7 +780,7 @@ void Window::new_project() {
     fail(result.failure_record());
     return;
   }
-  refresh();
+  refresh(true);
 }
 
 void Window::import_path(const QString& path) {
@@ -848,7 +872,6 @@ void Window::insert_selected() {
 }
 
 void Window::select_clip(std::string clip, std::string track) {
-  pause();
   selected_clip_ = std::move(clip);
   selected_track_ = std::move(track);
   refresh_properties();
@@ -1001,8 +1024,12 @@ void Window::poll() {
   bool ended = false, overflow = false;
   {
     std::lock_guard lock(mailbox_mutex_);
-    error = std::move(pending_error_);
-    ended = std::exchange(ended_, false);
+    if (error_generation_ == generation_) {
+      error = std::move(pending_error_);
+    } else {
+      pending_error_.reset();
+    }
+    ended = std::exchange(ended_, false) && ended_generation_ == generation_;
     overflow = std::exchange(overflow_, false);
     while (!pending_.empty()) {
       auto frame = pending_.front();
@@ -1102,7 +1129,7 @@ bool Window::load_path(const QString& path) {
   selected_clip_.clear();
   position_ = 0;
   selected_track_ = document_.project().tracks.empty() ? "" : document_.project().tracks[0].id;
-  refresh();
+  refresh(true);
   notice_->setText(QStringLiteral("工程已打开；缺失素材可在素材库中重新定位。"));
   load_thumbnails(0, document_epoch_);
   return true;

@@ -11,6 +11,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
 #include <QTest>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -154,6 +155,64 @@ class UiTests : public QObject {
     window.export_path(QString(FREECUT_SCREENSHOTS) + "/empty.mp4");
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, 5000);
     QVERIFY(!finished.at(0).at(0).toBool());
+  }
+
+  void edit_while_playing() {
+    using namespace livekit::sdk;
+    EditorProject project;
+    project.width = 160;
+    project.height = 90;
+    project.assets = {{"image", "Blue", std::string(FREECUT_FIXTURES) + "/blue.png", 0, 160, 90,
+                       true, false, true}};
+    project.tracks = {
+        {"video", "Video", false, false, false, false, {{"clip", "image", 0, 0, 600}}}};
+    QDir().mkpath(FREECUT_SCREENSHOTS);
+    const auto path = QString(FREECUT_SCREENSHOTS) + "/live-edit.freecut.json";
+    QVERIFY(editor_save(std::filesystem::u8path(path.toUtf8().toStdString()), project));
+    freecut::Window window(true);
+    window.show();
+    QVERIFY(window.load_path(path));
+    QTRY_VERIFY_WITH_TIMEOUT(window.findChild<QWidget*>("preview")->property("hasFrame").toBool(),
+                             5000);
+    auto* play = window.findChild<QPushButton*>("playPause");
+    auto* timecode = window.findChild<QLabel*>("timecode");
+    auto current_frame = [&] { return timecode->text().section(' ', 1, 1).toLongLong(); };
+    QTest::mouseClick(play, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(current_frame() >= 3, 3000);
+    auto* selected = window.findChild<QComboBox*>("selectedClip");
+    selected->activated(0);
+    QCOMPARE(play->text(), QStringLiteral("暂停"));
+    auto* opacity = window.findChild<QDoubleSpinBox*>("clipOpacity");
+    QVERIFY(opacity->isEnabled());
+    auto* saturation = window.findChild<QDoubleSpinBox*>("saturation");
+    QVERIFY(saturation->isEnabled());
+    saturation->setValue(0);  // Add algorithm/converter nodes during playback.
+    opacity->setValue(.25);
+    QTest::mouseClick(window.findChild<QPushButton*>("applyProperties"), Qt::LeftButton);
+    QCOMPARE(window.document().project().tracks[0].clips[0].opacity, .25);
+    QCOMPARE(window.document().project().tracks[0].clips[0].color.saturation, 0.);
+    QCOMPARE(play->text(), QStringLiteral("暂停"));
+    const auto edited_at = current_frame();
+    QTRY_VERIFY_WITH_TIMEOUT(current_frame() >= edited_at + 3, 3000);
+    QVERIFY(!window.findChild<QLabel*>("notice")->text().contains(QStringLiteral("失败")));
+    // A second update while frames are arriving must not accept old terminal events.
+    saturation->setValue(1);  // Remove the effect branch while frames are arriving.
+    opacity->setValue(.75);
+    QTest::mouseClick(window.findChild<QPushButton*>("applyProperties"), Qt::LeftButton);
+    QCOMPARE(window.document().project().tracks[0].clips[0].color.saturation, 1.);
+    const auto second_edit = current_frame();
+    QTRY_VERIFY_WITH_TIMEOUT(current_frame() >= second_edit + 3, 3000);
+    QCOMPARE(play->text(), QStringLiteral("暂停"));
+    QTest::mouseClick(play, Qt::LeftButton);
+    QCOMPARE(play->text(), QStringLiteral("播放"));
+    opacity->setValue(.5);
+    QTest::mouseClick(window.findChild<QPushButton*>("applyProperties"), Qt::LeftButton);
+    QTest::qWait(150);
+    QCOMPARE(play->text(), QStringLiteral("播放"));
+    // Loading a different project still pauses rather than implicitly playing it.
+    QTest::mouseClick(play, Qt::LeftButton);
+    QVERIFY(window.load_path(path));
+    QCOMPARE(play->text(), QStringLiteral("播放"));
   }
 
   void timeline_drag() {

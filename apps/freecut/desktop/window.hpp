@@ -59,7 +59,7 @@ class Window final : public QMainWindow {
 
   void fail(livekit::sdk::Failure failure);
   void edited(livekit::sdk::Result<void> result);
-  void refresh();
+  void refresh(bool pause_playback = false);
   void refresh_properties();
   void select_clip(std::string clip, std::string track);
   void add_track(bool audio);
@@ -109,6 +109,10 @@ class Window final : public QMainWindow {
   std::deque<std::shared_ptr<const livekit::sdk::EditorFrame>> pending_;
   livekit::sdk::Failure pending_error_;
   bool ended_ = false, overflow_ = false;
+  // Protected by mailbox_mutex_; tag terminal callbacks with the worker's last
+  // delivered generation so old playback cannot stop a freshly updated project.
+  uint64_t mailbox_generation_ = 0, delivered_generation_ = 0;
+  uint64_t ended_generation_ = 0, error_generation_ = 0;
   bool playing_ = false, silent_ = false, exporting_ = false, updating_ = false;
   bool playback_finished_ = false;
   uint64_t generation_ = 0, document_epoch_ = 0;

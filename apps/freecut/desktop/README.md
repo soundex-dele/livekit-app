@@ -31,9 +31,38 @@
 
 嵌入目标 `nndeploy_flow::media` 复用宿主 GraphFlow targets，只编译模型无关的图像、音频和特效节点；不需要 Python、HTTP 服务或模型。完整 nndeploy 构建保持原有路径。媒体目标不包含 Tensor 分割事件桥接。
 
-`EffectSession` 属于每个 `RenderGraph`，预览与导出独立持有实例。内部将 RGBA 转为 RGB `MediaFrameEvent`、双声道 PCM 转为 `AudioEvent`，运行 `ColorGrade`、`Transition`、`TimeStretch`；同参数效果图会复用，每类最多缓存 8 个。转场按事件时间计算进度，避免逐帧重建节点。颜色对比度和饱和度在适配层补充计算。字幕通过 FFmpeg 的 libass 滤镜渲染为透明图层并缓存。
+每个预览或导出 `RenderGraph` 只有一个主 GraphEngine。`EffectNodes` 根据工程生成节点与连接计划，不创建嵌套 GraphEngine。`ColorGrade`、`Transition`、`TimeStretch` 是直接注册到主图的 nndeploy 算法节点；饱和度/对比度、音频淡入淡出、libass 文字渲染也是独立节点。RGBA↔RGB、float PCM↔`AudioEvent` 由专门的转换节点完成，转换节点不承担算法处理。
+
+处理顺序直接由图的连接表示。decode 只解码媒体并输出 `Layer`，独立的 `editor.route` 按片段 ID 选择处理链：
+
+```text
+timeline → decode → route → 当前片段的处理链 → composite → mix → result_route → output
+                                                                └→ 转场链 → output
+```
+
+每个片段的处理链按启用的功能连接，没有启用的节点直接跳过：
+
+- 调色：`RGBA转RGB → ColorGrade → 饱和度/对比度 → RGB转RGBA`，保留源 alpha。
+- 变速：`float转AudioEvent → TimeStretch → AudioEvent转float → AudioWindow`。AudioWindow 缓存处理后的固定音频块并裁出当前帧需要的样本。
+- 淡入淡出：`AudioFade` 位于变速/样本裁剪之后。
+- 文字：文字片段经过 `TextRender` 输出图层，然后进入 composite。文字图像缓存有数量与字节上限。
+- 转场：两侧片段先沿各自处理链完成合成与混音，再经 `result_route → TransitionJoin → 双输入RGBA转RGB → Transition → RGB转RGBA → TransitionCommit → output`。Join 的两个输入槽属于当前帧事务，到齐才发布下游事件，不跨帧或跨 generation 拼接图层。
+
+转换终点恢复 `Layer` 后直接发布下一条边，decode 不调用效果方法、不等待写回再恢复流程。隐藏画面、静音或变速缓存命中通过显式 `bypass` 边继续，保证处理链最终到达输出。边声明 `Layer`、`MediaFrameEvent` 或 `AudioEvent` 类型；算法之间的转换关联记录持有当前 Work，并在转换完成或整帧失败时释放。
+
+所有节点和边属于同一个主 GraphEngine。无效果时有 7 个公共节点（timeline、decode、route、composite、mix、result_route、output），效果节点按片段增删。独立路由节点只选择通路，具体算法执行顺序由边连接决定。
 
 编辑器主体保持禁异常编译；仅私有第三方适配库捕获 nndeploy/OpenCV 异常并返回明确错误。处理是有界同步调用，取消在媒体块之间检查；没有宣称实现 GPU 加速或大型工程实时性能指标。
+
+## 编辑时热重载
+
+播放中修改属性、增删片段或效果、撤销/重做会保留播放状态，更新完成后继续推进。暂停中编辑保持暂停；新建/打开工程、主动定位和导出仍按对应操作暂停。UI 按工程 generation 丢弃旧帧与旧结束/错误通知，清掉旧 PCM 后接收新工程输出。
+
+`EditorSession` 的同一工作线程串行执行渲染和工程更新：正在执行的一帧先结束，再调用 `reloadFromNodesDetailed` 切换主图订阅和连接。节点 ID 由片段 ID、算法和职责组成；同 ID、同参数复用实例，参数变化替换对应算法，启用/移除效果增删整条分支。新增节点 init/start，移除节点 stop/release，保留节点只重建订阅。文字或素材派生缓存失效后按需重建；路径、元数据与磁盘时间戳/大小未变的解码器保留。
+
+工程校验失败保留原图；重载失败返回明确错误并停止本次续播，恢复失败或提交后清理失败会禁止继续使用状态不确定的图。`set_project(..., play_after_update=true)` 在渲染指定位置后从下一帧续播，默认参数仍保持暂停语义。导出持有独立工程快照和主图，不跟随预览编辑。
+
+当前图沿边同步派发，帧与工程更新在同一工作线程串行执行，不使用节点私有任务队列。事件持有图像、音频和已求值片段的生命周期；轨道与素材仍引用当前工程。以后引入异步算法时，需要进一步扩展工程快照所有权、关联表同步、背压及更新时队列排空机制。编辑期间保持播放状态，但重载、缓存重建和音频缓冲重置可能带来短暂画面延迟或音频间隙；尚未保证无缝声学输出。
 
 ## Windows 构建与部署
 
@@ -61,7 +90,7 @@ cmake --install out/freecut --config Release --prefix out/freecut/dist
 
 本次构建与测试结果见 [Windows 验证记录](VALIDATION.md)。
 
-测试使用合成视频、图片和音频，覆盖编辑事务、暂停定位、跨片段播放、轨道合成和混音、工程往返保存、取消和失败输出保护，以及实际导出文件的编解码参数、时长、画面和两路音频。Qt 使用 offscreen 平台，覆盖 1× / 2× 界面，并在构建目录 `screenshots/` 保存程序内截图。
+测试使用合成视频、图片和音频，覆盖编辑事务、暂停定位、跨片段播放、轨道合成和混音、工程往返保存、取消和失败输出保护，以及实际导出文件的编解码参数、时长、画面和两路音频。热重载测试对比新建图的像素/PCM，检查真实主图中的算法与转换节点、参数替换和节点复用，并验证播放中效果增删。Qt 使用 offscreen 平台，覆盖 1× / 2× 界面，并在构建目录 `screenshots/` 保存程序内截图。
 
 ```powershell
 ./out/freecut/Release/freecut.exe --hidden --screenshot <绝对截图路径>
