@@ -79,8 +79,9 @@ inline const char* state_label(std::string_view state) {
 }
 
 inline const char* error_label(std::string_view detail) {
-  if (detail.find("file.source") != detail.npos)
+  if (detail.find("file.demuxer/io:") != detail.npos || detail.find("file.source") != detail.npos) {
     return "无法打开文件，请检查路径、文件是否存在以及读取权限。";
+  }
   if (detail.find("demuxer") != detail.npos || detail.find("decoder") != detail.npos)
     return "无法读取媒体内容，文件可能损坏或格式不受支持。";
   if (detail.find("code_unavailable") != detail.npos)

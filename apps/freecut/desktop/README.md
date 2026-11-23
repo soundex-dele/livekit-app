@@ -1,6 +1,6 @@
 # FreeCut 桌面剪辑器
 
-独立 C++17 / Qt6 Widgets 应用，通过 `LiveKit::Editor` 完成多轨预览和离线导出。媒体图使用 GraphEngine；不依赖 RTC、旧 VideoPlayer 或 CompositeEngine。
+独立 C++17 / Qt6 Widgets 应用，通过 `LiveKit::Editor` 完成多轨预览和离线导出。媒体图使用 `graphflow-cpp-refactor`；不依赖 RTC、旧 VideoPlayer 或 CompositeEngine。
 
 ## 使用
 
@@ -25,34 +25,16 @@
 - 调色支持亮度、对比度、饱和度、色温。音频支持音量和以工程帧为单位的淡入淡出。修改速度后重新计算片段长度，保持音高；自由轨冲突会拒绝整个编辑事务。
 - `.freecut.json` 使用 v2，兼容加载 v1，保存时升级；未知未来版本明确拒绝。保存采用临时文件加原子替换。旧程序不能加载 v2。
 
-## nndeploy 集成
+## 渲染图与算法依赖
 
-聚合仓库的 `nndeploy-flow` 子模块以 `13cce6f2ec230b2a5082d6cff752803818daf7f0` 为基线，工作区包含本次原生媒体嵌入改动。单独检出 SDK 时，可通过 `LIVEKIT_NNDEPLOY_ROOT` 指定对应源码。
-
-嵌入目标 `nndeploy_flow::media` 复用宿主 GraphFlow targets，只编译模型无关的图像、音频和特效节点；不需要 Python、HTTP 服务或模型。完整 nndeploy 构建保持原有路径。媒体目标不包含 Tensor 分割事件桥接。
-
-每个预览或导出 `RenderGraph` 只有一个主 GraphEngine。`EffectNodes` 根据工程生成节点与连接计划，不创建嵌套 GraphEngine。`ColorGrade`、`Transition`、`TimeStretch` 是直接注册到主图的 nndeploy 算法节点；饱和度/对比度、音频淡入淡出、libass 文字渲染也是独立节点。RGBA↔RGB、float PCM↔`AudioEvent` 由专门的转换节点完成，转换节点不承担算法处理。
-
-处理顺序直接由图的连接表示。decode 只解码媒体并输出 `Layer`，独立的 `editor.route` 按片段 ID 选择处理链：
+预览和导出均在各自工作线程上运行 `graphflow-cpp-refactor` 的同步类型化图，不链接旧 GraphFlow 或 nndeploy 的图节点。通过 `LIVEKIT_NNDEPLOY_ROOT` 定位共享的保音高相位声码器头文件，Editor 本身不需要 OpenCV。
 
 ```text
-timeline → decode → route → 当前片段的处理链 → composite → mix → result_route → output
-                                                                └→ 转场链 → output
+timeline → decode → route → 片段效果 → composite → mix → result_route → output
+                                                         └→ join → transition → commit → output
 ```
 
-每个片段的处理链按启用的功能连接，没有启用的节点直接跳过：
-
-- 调色：`RGBA转RGB → ColorGrade → 饱和度/对比度 → RGB转RGBA`，保留源 alpha。
-- 变速：`float转AudioEvent → TimeStretch → AudioEvent转float → AudioWindow`。AudioWindow 缓存处理后的固定音频块并裁出当前帧需要的样本。
-- 淡入淡出：`AudioFade` 位于变速/样本裁剪之后。
-- 文字：文字片段经过 `TextRender` 输出图层，然后进入 composite。文字图像缓存有数量与字节上限。
-- 转场：两侧片段先沿各自处理链完成合成与混音，再经 `result_route → TransitionJoin → 双输入RGBA转RGB → Transition → RGB转RGBA → TransitionCommit → output`。Join 的两个输入槽属于当前帧事务，到齐才发布下游事件，不跨帧或跨 generation 拼接图层。
-
-转换终点恢复 `Layer` 后直接发布下一条边，decode 不调用效果方法、不等待写回再恢复流程。隐藏画面、静音或变速缓存命中通过显式 `bypass` 边继续，保证处理链最终到达输出。边声明 `Layer`、`MediaFrameEvent` 或 `AudioEvent` 类型；算法之间的转换关联记录持有当前 Work，并在转换完成或整帧失败时释放。
-
-所有节点和边属于同一个主 GraphEngine。无效果时有 7 个公共节点（timeline、decode、route、composite、mix、result_route、output），效果节点按片段增删。独立路由节点只选择通路，具体算法执行顺序由边连接决定。
-
-编辑器主体保持禁异常编译；仅私有第三方适配库捕获 nndeploy/OpenCV 异常并返回明确错误。处理是有界同步调用，取消在媒体块之间检查；没有宣称实现 GPU 加速或大型工程实时性能指标。
+片段可连接调色、变速、音频窗口裁切、淡入淡出或文字节点。调色直接处理 RGBA 副本，保留 alpha；转场使用本帧的两个图层，不跨代等待。工程热更新先在帧边界构建并启动候选图，成功才替换；不跨图复用绑定或发送器。未变化的效果可复用处理状态，素材是否复用解码器另按媒体参数和文件信息判定。
 
 ## 编辑时热重载
 
