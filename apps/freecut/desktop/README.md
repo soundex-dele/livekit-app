@@ -1,6 +1,6 @@
 # FreeCut 桌面剪辑器
 
-独立 C++17 / Qt6 Widgets 应用，通过 `LiveKit::Editor` 完成多轨预览和离线导出。媒体图使用 `graphflow-cpp-refactor`；不依赖 RTC、旧 VideoPlayer 或 CompositeEngine。
+独立 C++17 / Qt6 Widgets 应用，通过 `LiveKit::Editor` 完成多轨预览和离线导出。媒体图使用 `graphflow-cpp`；不依赖 RTC、旧 VideoPlayer 或 CompositeEngine。
 
 ## 使用
 
@@ -27,7 +27,7 @@
 
 ## 渲染图与算法依赖
 
-预览和导出均在各自工作线程上运行 `graphflow-cpp-refactor` 的同步类型化图，不链接旧 GraphFlow 或 nndeploy 的图节点。通过 `LIVEKIT_NNDEPLOY_ROOT` 定位共享的保音高相位声码器头文件，Editor 本身不需要 OpenCV。
+预览和导出均在各自工作线程上运行 `graphflow-cpp` 的同步类型化图，不链接旧 GraphFlow 或 nndeploy 的图节点。通过 `LIVEKIT_NNDEPLOY_ROOT` 定位共享的保音高相位声码器头文件，Editor 本身不需要 OpenCV。
 
 ```text
 timeline → decode → route → 片段效果 → composite → mix → result_route → output
